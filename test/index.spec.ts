@@ -1,5 +1,39 @@
 import { env, SELF } from 'cloudflare:test';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+
+// ── RPC mock helpers ─────────────────────────────────────────────────────────
+
+const PAYTO = '0xBcF326ff22CDEc10Ca4F8AE9415Bb6884a0c26D3';
+const USDC_SEPOLIA = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+function makeReceipt(toAddress: string, rawAmount: bigint, status = '0x1') {
+  return {
+    status,
+    logs: [{
+      address: USDC_SEPOLIA.toLowerCase(),
+      topics: [
+        TRANSFER_TOPIC,
+        '0x' + 'dead'.padStart(64, '0'), // from — not checked
+        '0x000000000000000000000000' + toAddress.slice(2).toLowerCase(),
+      ],
+      data: '0x' + rawAmount.toString(16).padStart(64, '0'),
+    }],
+  };
+}
+
+function stubRpc(receipt: object | null) {
+  const real = globalThis.fetch;
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
+    if (url.includes('.base.org')) {
+      return new Response(JSON.stringify({ jsonrpc: '2.0', result: receipt, id: 1 }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return real(input, init);
+  });
+}
 
 async function provisionAccount(): Promise<{ apiKey: string; accountId: string }> {
   const res = await SELF.fetch('http://localhost/v1/account', { method: 'POST' });
@@ -235,5 +269,198 @@ describe('POST /v1/budget/clear', () => {
     const body = await res.json<{ approved: boolean; reason: string }>();
     expect(body.approved).toBe(false);
     expect(body.reason).toBe('envelope_exceeded');
+  });
+});
+
+// ── Payment UI ───────────────────────────────────────────────────────────────
+
+describe('GET /v1/packs/:pack/info', () => {
+  it('returns correct shape for each pack', async () => {
+    const packs = [
+      { name: 'starter', amount_usd: 19, raw: '19000000' },
+      { name: 'growth',  amount_usd: 39, raw: '39000000' },
+      { name: 'studio',  amount_usd: 79, raw: '79000000' },
+    ];
+    for (const p of packs) {
+      const res = await SELF.fetch(`http://localhost/v1/packs/${p.name}/info`);
+      expect(res.status).toBe(200);
+      const body = await res.json<Record<string, unknown>>();
+      expect(body.pack).toBe(p.name);
+      expect(body.amount_usd).toBe(p.amount_usd);
+      expect(body.usdc_amount_raw).toBe(p.raw);
+      expect(body.usdc_contract).toBeTruthy();
+      expect(body.payto_address).toBeTruthy();
+    }
+  });
+
+  it('returns 404 for unknown pack', async () => {
+    const res = await SELF.fetch('http://localhost/v1/packs/invalid/info');
+    expect(res.status).toBe(404);
+    expect((await res.json<{ error: string }>()).error).toBe('invalid_pack');
+  });
+});
+
+describe('GET /pay/:pack', () => {
+  it('renders pay page for each pack', async () => {
+    for (const pack of ['starter', 'growth', 'studio']) {
+      const res = await SELF.fetch(`http://localhost/pay/${pack}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/html');
+      const html = await res.text();
+      expect(html).toContain('USDC');
+      expect(html).toContain(PAYTO);
+    }
+  });
+
+  it('returns 404 for unknown pack', async () => {
+    const res = await SELF.fetch('http://localhost/pay/unknown');
+    expect(res.status).toBe(404);
+  });
+
+  it('blocks XSS via malformed api_key', async () => {
+    const res = await SELF.fetch('http://localhost/pay/starter?api_key=x%22%3E%3Cscript%3E');
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts valid api_key format', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch(`http://localhost/pay/starter?api_key=${apiKey}`);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain(apiKey);
+  });
+});
+
+describe('POST /v1/account/topup-verify/:pack', () => {
+  const VALID_TX = '0x' + 'a'.repeat(64);
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('returns 401 without auth', async () => {
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: VALID_TX }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 400 for invalid tx_hash format', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: 'not-a-hash' }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('invalid_tx_hash');
+  });
+
+  it('returns 400 for invalid pack', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/fake', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: VALID_TX }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('invalid_pack');
+  });
+
+  it('returns 409 for already-used tx hash', async () => {
+    const { apiKey } = await provisionAccount();
+    await env.BUDGET_KV.put(`used_tx:84532:${VALID_TX}`, '1');
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: VALID_TX }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json<{ error: string }>()).error).toBe('already_used');
+  });
+
+  it('returns 400 when tx not found on chain', async () => {
+    stubRpc(null);
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: '0x' + 'b'.repeat(64) }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('tx_not_found');
+  });
+
+  it('credits account and marks tx used on valid payment', async () => {
+    const TX = '0x' + 'c'.repeat(64);
+    stubRpc(makeReceipt(PAYTO, 19_000_000n));
+    const { apiKey } = await provisionAccount();
+
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ balance_usd: number; credited: number }>();
+    expect(body.credited).toBe(19);
+    expect(body.balance_usd).toBe(19);
+
+    // tx marked as used in KV
+    const used = await env.BUDGET_KV.get(`used_tx:84532:${TX}`);
+    expect(used).toBe('1');
+
+    // balance persisted
+    const balRes = await SELF.fetch('http://localhost/v1/account/balance', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect((await balRes.json<{ balance_usd: number }>()).balance_usd).toBe(19);
+  });
+
+  it('rejects second submit of same tx hash (replay protection)', async () => {
+    const TX = '0x' + 'd'.repeat(64);
+    stubRpc(makeReceipt(PAYTO, 19_000_000n));
+    const { apiKey } = await provisionAccount();
+    await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX }),
+    });
+
+    const second = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX }),
+    });
+    expect(second.status).toBe(409);
+    expect((await second.json<{ error: string }>()).error).toBe('already_used');
+  });
+
+  it('rejects transfer to wrong address', async () => {
+    const TX = '0x' + 'e'.repeat(64);
+    stubRpc(makeReceipt('0x' + 'dead'.padStart(40, '0'), 19_000_000n));
+    const { apiKey } = await provisionAccount();
+
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('transfer_not_found');
+  });
+
+  it('rejects wrong USDC amount', async () => {
+    const TX = '0x' + 'f'.repeat(64);
+    stubRpc(makeReceipt(PAYTO, 1_000_000n)); // $1 instead of $19
+    const { apiKey } = await provisionAccount();
+
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('transfer_not_found');
   });
 });
