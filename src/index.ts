@@ -5,6 +5,7 @@ import { mcpHandler } from './routes/mcp';
 import accountRoutes from './routes/account';
 import envelopeRoutes from './routes/envelope';
 import budgetRoutes from './routes/budget';
+import payRoutes from './routes/pay';
 import { getAccount, getBalance, setBalance } from './lib/kv';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -130,6 +131,10 @@ app.post('/v1/admin/seed', async (c) => {
 
   return c.json({ ok: true, api_key: body.api_key, credited: body.amount_usd, balance_usd: newBalance });
 });
+
+// Human payment routes — mounted before x402 middleware to avoid interception.
+// /v1/packs/:pack/info, /v1/account/topup-verify/:pack, /pay/:pack
+app.route('/', payRoutes);
 
 // x402 payment gate — must run before account routes so topup/:pack sees payment verification.
 // Initialized lazily on first request so PAYTO_ADDRESS is available from env.
