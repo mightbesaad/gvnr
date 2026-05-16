@@ -86,12 +86,15 @@ app.get('/', (c) => {
       <h2>Quick start</h2>
       <pre># 1. Provision an account
 curl -X POST https://budget-governor.billowing-glade-3692.workers.dev/v1/account
-# → { "api_key": "bg_...", "account_id": "..." }
+# → { "api_key": "bg_...", "account_id": "..." }</pre>
 
-# 2. Top up credits — open in your browser
-https://budget-governor.billowing-glade-3692.workers.dev/pay/starter?api_key=bg_YOUR_KEY
+      <p style="font-size:0.8rem;color:#555;margin:10px 0 6px"># 2. Top up credits — open in your browser</p>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
+        <div style="font-family:'SF Mono','Fira Code',monospace;font-size:0.78rem;color:#ccc;background:#111;border:1px solid #1f1f1f;border-radius:8px;padding:10px 12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="qs-url">https://budget-governor.billowing-glade-3692.workers.dev/pay/starter?api_key=bg_YOUR_KEY</div>
+        <button onclick="(function(b){navigator.clipboard.writeText(document.getElementById('qs-url').textContent).then(()=>{var t=b.textContent;b.textContent='Copied!';setTimeout(()=>b.textContent=t,1500)})})(this)" style="border:none;border-radius:6px;padding:9px 14px;font-size:0.82rem;font-weight:500;cursor:pointer;background:#1a1a2e;color:#a78bfa;border:1px solid #2a2a4a;white-space:nowrap">Copy</button>
+      </div>
 
-# 3. Set an envelope for your agent
+      <pre># 3. Set an envelope for your agent
 curl -X PUT \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
