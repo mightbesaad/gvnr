@@ -172,3 +172,11 @@ Model pricing is a static lookup on the hot path — no external calls. Includes
 | `eip155:8453` | Base mainnet | Real USDC |
 
 Current deployment: Base mainnet.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+The canonical hosted service is at `https://budget-governor.billowing-glade-3692.workers.dev`. Self-hosted instances are unaffiliated.
