@@ -53,23 +53,23 @@ app.get('/', (c) => {
     .tool { background: #111; border: 1px solid #1f1f1f; border-radius: 8px; padding: 14px 16px; }
     .tool-name { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.85rem; color: #a78bfa; margin-bottom: 4px; }
     .tool-desc { font-size: 0.85rem; color: #888; }
-    pre { background: #111; border: 1px solid #1f1f1f; border-radius: 8px; padding: 16px; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem; color: #ccc; overflow-x: auto; line-height: 1.6; }
+    pre { background: #111; border: 1px solid #1f1f1f; border-radius: 8px; padding: 16px; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem; color: #ccc; white-space: pre-wrap; word-break: break-all; line-height: 1.6; }
     .network-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 0.78rem; font-family: monospace; background: #1a1a2e; color: #818cf8; border: 1px solid #2a2a4a; }
     .packs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
     .pack { display: block; background: #111; border: 1px solid #1f1f1f; border-radius: 8px; padding: 16px 18px; text-decoration: none; color: inherit; flex: 1; min-width: 150px; transition: border-color 0.15s; }
     .pack:hover { border-color: #4f46e5; }
     .pack-name { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.85rem; color: #a78bfa; margin-bottom: 4px; }
     .pack-price { font-size: 1.25rem; font-weight: 700; color: #e5e5e5; margin-bottom: 4px; }
-    .pack-detail { font-size: 0.82rem; color: #555; }
+    .pack-detail { font-size: 0.82rem; color: #888; }
     .key-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
     .key-input { flex: 1; background: #0f0f0f; border: 1px solid #222; border-radius: 6px; padding: 8px 12px; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.82rem; color: #ccc; outline: none; transition: border-color 0.15s; }
     .key-input:focus { border-color: #4f46e5; }
-    .key-input::placeholder { color: #444; }
+    .key-input::placeholder { color: #555; }
     footer { border-top: 1px solid #1a1a1a; margin-top: 48px; padding-top: 24px; }
-    .footer-row { display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.78rem; color: #444; line-height: 1.8; }
-    .footer-row a { color: #555; text-decoration: none; }
-    .footer-row a:hover { color: #888; }
-    .footer-mono { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.72rem; }
+    .footer-row { display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.78rem; color: #666; line-height: 1.8; }
+    .footer-row a { color: #777; text-decoration: none; }
+    .footer-row a:hover { color: #aaa; }
+    .footer-mono { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.72rem; color: #888; }
   </style>
 </head>
 <body>
@@ -108,7 +108,7 @@ app.get('/', (c) => {
       <div class="key-row">
         <input class="key-input" id="api-key-input" type="text" placeholder="Paste your API key (bg_...) to pre-fill payment links" autocomplete="off" spellcheck="false">
       </div>
-      <p style="font-size:0.78rem;color:#333;margin-top:8px">Pay with USDC on Base mainnet. Credits added immediately after on-chain verification.</p>
+      <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay with USDC on Base mainnet. Credits added immediately after on-chain verification.</p>
     </section>
 
     <section>
@@ -135,7 +135,7 @@ app.get('/', (c) => {
 curl -X POST https://budget-governor.billowing-glade-3692.workers.dev/v1/account
 # → { "api_key": "bg_...", "account_id": "..." }</pre>
 
-      <p style="font-size:0.8rem;color:#555;margin:10px 0 6px"># 2. Top up credits — open in your browser</p>
+      <p style="font-size:0.8rem;color:#888;margin:10px 0 6px"># 2. Top up credits — open in your browser</p>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
         <div style="font-family:'SF Mono','Fira Code',monospace;font-size:0.78rem;color:#ccc;background:#111;border:1px solid #1f1f1f;border-radius:8px;padding:10px 12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="qs-url">https://budget-governor.billowing-glade-3692.workers.dev/pay/starter?api_key=bg_YOUR_KEY</div>
         <button onclick="(function(b){navigator.clipboard.writeText(document.getElementById('qs-url').textContent).then(()=>{var t=b.textContent;b.textContent='Copied!';setTimeout(()=>b.textContent=t,1500)})})(this)" style="border:none;border-radius:6px;padding:9px 14px;font-size:0.82rem;font-weight:500;cursor:pointer;background:#1a1a2e;color:#a78bfa;border:1px solid #2a2a4a;white-space:nowrap">Copy</button>
@@ -165,7 +165,7 @@ gpt-4o                $2.50 / $10.00
 gpt-4o-mini           $0.15 /  $0.60
 gemini-1-5-pro        $1.25 /  $3.50
 (unknown model)      $15.00 / $15.00  conservative default</pre>
-      <p style="font-size:0.8rem;color:#555;margin-top:10px">budget_clear deducts estimated output cost. Unused tokens are not charged.</p>
+      <p style="font-size:0.8rem;color:#888;margin-top:10px">budget_clear deducts estimated output cost. Unused tokens are not charged.</p>
     </section>
 
     <footer>

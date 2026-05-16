@@ -145,13 +145,13 @@ function payPage(d: PageData): string {
     h1{font-size:1.4rem;font-weight:600;letter-spacing:-0.02em;margin-bottom:4px}
     .sub{color:#888;font-size:0.9rem;margin-bottom:36px}
     .card{background:#111;border:1px solid #1f1f1f;border-radius:10px;padding:20px 22px;margin-bottom:16px}
-    .step-label{font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#555;margin-bottom:10px}
+    .step-label{font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#888;margin-bottom:10px}
     .pack-row{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
     .pack-name{font-size:1.1rem;font-weight:600}
     .pack-price{font-size:1.5rem;font-weight:700;color:#a78bfa}
     .pack-desc{font-size:0.85rem;color:#888}
-    .pack-switch{font-size:0.8rem;color:#555;margin-top:8px}
-    .field-label{font-size:0.75rem;color:#555;margin-bottom:5px;margin-top:14px}
+    .pack-switch{font-size:0.8rem;color:#777;margin-top:8px}
+    .field-label{font-size:0.75rem;color:#777;margin-bottom:5px;margin-top:14px}
     .field-label:first-of-type{margin-top:0}
     .copy-row{display:flex;gap:8px;align-items:center}
     .mono{font-family:"SF Mono","Fira Code",monospace;font-size:0.82rem;color:#ccc;background:#0f0f0f;border:1px solid #222;border-radius:6px;padding:9px 12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -164,7 +164,7 @@ function payPage(d: PageData): string {
     .badge.testnet{background:#1a1a2e;color:#818cf8;border-color:#2a2a4a}
     input[type=text]{width:100%;background:#0f0f0f;border:1px solid #222;border-radius:6px;padding:9px 12px;font-family:"SF Mono","Fira Code",monospace;font-size:0.82rem;color:#ccc;outline:none;transition:border-color 0.15s}
     input[type=text]:focus{border-color:#4f46e5}
-    input[type=text]::placeholder{color:#444}
+    input[type=text]::placeholder{color:#555}
     .key-row{display:flex;gap:8px;margin-bottom:0}
     .key-input{flex:1}
     .status{margin-top:14px;padding:10px 12px;border-radius:6px;font-size:0.85rem;display:none}
@@ -172,7 +172,7 @@ function payPage(d: PageData): string {
     .status.err{background:#1f0a0a;border:1px solid #3a1e1e;color:#f87171}
     .status.info{background:#0f0f1f;border:1px solid #1e1e3a;color:#818cf8}
     .divider{border:none;border-top:1px solid #1a1a1a;margin:16px 0}
-    .instructions{font-size:0.83rem;color:#666;line-height:1.7;margin-top:10px}
+    .instructions{font-size:0.83rem;color:#888;line-height:1.7;margin-top:10px}
     .instructions li{margin-left:16px}
   </style>
 </head>
@@ -248,11 +248,11 @@ function payPage(d: PageData): string {
         <li>Call <code style="font-size:0.78rem;color:#a78bfa">budget_clear</code> before each LLM request</li>
         <li>Or add the MCP server to Claude Desktop / Claude Code:</li>
       </ol>
-      <div class="mono" id="mcp-cmd" style="margin-top:10px;white-space:pre;font-size:0.75rem;overflow-x:auto"></div>
+      <div class="mono" id="mcp-cmd" style="margin-top:10px;white-space:pre-wrap;word-break:break-all;font-size:0.75rem"></div>
     </div>
   </div>
 
-  <p style="font-size:0.78rem;color:#333;text-align:center;margin-top:20px">
+  <p style="font-size:0.78rem;color:#666;text-align:center;margin-top:20px">
     Need help? Check your balance at <code style="font-size:0.75rem">GET /v1/account/balance</code>
   </p>
 </div>
