@@ -46,6 +46,12 @@ app.get('/', (c) => {
     .tool-desc { font-size: 0.85rem; color: #888; }
     pre { background: #111; border: 1px solid #1f1f1f; border-radius: 8px; padding: 16px; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem; color: #ccc; overflow-x: auto; line-height: 1.6; }
     .network-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 0.78rem; font-family: monospace; background: #1a1a2e; color: #818cf8; border: 1px solid #2a2a4a; }
+    .packs { display: flex; gap: 10px; flex-wrap: wrap; }
+    .pack { display: block; background: #111; border: 1px solid #1f1f1f; border-radius: 8px; padding: 16px 18px; text-decoration: none; color: inherit; flex: 1; min-width: 150px; transition: border-color 0.15s; }
+    .pack:hover { border-color: #3f3f3f; }
+    .pack-name { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.85rem; color: #a78bfa; margin-bottom: 4px; }
+    .pack-price { font-size: 1.25rem; font-weight: 700; color: #e5e5e5; margin-bottom: 4px; }
+    .pack-detail { font-size: 0.82rem; color: #555; }
   </style>
 </head>
 <body>
@@ -80,15 +86,19 @@ app.get('/', (c) => {
       <h2>Quick start</h2>
       <pre># 1. Provision an account
 curl -X POST https://budget-governor.billowing-glade-3692.workers.dev/v1/account
+# → { "api_key": "bg_...", "account_id": "..." }
 
-# 2. Set an envelope for your agent
+# 2. Top up credits — open in your browser
+https://budget-governor.billowing-glade-3692.workers.dev/pay/starter?api_key=bg_YOUR_KEY
+
+# 3. Set an envelope for your agent
 curl -X PUT \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"agent_id":"my-agent","limit_usd":5,"window":"daily"}' \\
   https://budget-governor.billowing-glade-3692.workers.dev/v1/budget/envelope
 
-# 3. Call before each LLM request
+# 4. Call before each LLM request
 curl -X POST \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
@@ -97,10 +107,37 @@ curl -X POST \\
     </section>
 
     <section>
+      <h2>Model pricing</h2>
+      <pre>claude-opus-4-7      $15.00 / $75.00  per M tokens (in / out)
+claude-sonnet-4-6     $3.00 / $15.00
+claude-haiku-4-5      $0.80 /  $4.00
+gpt-4o                $2.50 / $10.00
+gpt-4o-mini           $0.15 /  $0.60
+gemini-1-5-pro        $1.25 /  $3.50
+(unknown model)      $15.00 / $15.00  conservative default</pre>
+      <p style="font-size:0.8rem;color:#555;margin-top:10px">budget_clear deducts the estimated output cost. Unused tokens are not charged.</p>
+    </section>
+
+    <section>
       <h2>Credit packs</h2>
-      <pre>starter  $19 / month   ~10k clearances
-growth   $39 / month   ~30k clearances
-studio   $79 / month   ~100k clearances</pre>
+      <div class="packs">
+        <a class="pack" href="/pay/starter">
+          <div class="pack-name">starter</div>
+          <div class="pack-price">$19</div>
+          <div class="pack-detail">~10k clearances / month</div>
+        </a>
+        <a class="pack" href="/pay/growth">
+          <div class="pack-name">growth</div>
+          <div class="pack-price">$39</div>
+          <div class="pack-detail">~30k clearances / month</div>
+        </a>
+        <a class="pack" href="/pay/studio">
+          <div class="pack-name">studio</div>
+          <div class="pack-price">$79</div>
+          <div class="pack-detail">~100k clearances / month</div>
+        </a>
+      </div>
+      <p style="font-size:0.8rem;color:#555;margin-top:12px">Pay with USDC on Base mainnet. Credits are added immediately after on-chain verification.</p>
     </section>
   </div>
 </body>

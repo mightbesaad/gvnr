@@ -36,14 +36,23 @@ curl -X POST https://budget-governor.billowing-glade-3692.workers.dev/v1/account
 
 ### 2. Top up credits
 
+Open the payment page for your chosen pack, pass your API key as a query param:
+
+```
+https://budget-governor.billowing-glade-3692.workers.dev/pay/starter?api_key=bg_YOUR_KEY
+```
+
+Send USDC on Base to the address shown, paste your tx hash — credits are added after on-chain verification.
+
+Or, if you prefer the programmatic path — POST the tx hash directly:
+
 ```bash
 curl -X POST \
   -H "Authorization: Bearer bg_YOUR_KEY" \
-  https://budget-governor.billowing-glade-3692.workers.dev/v1/account/topup/starter
-# Returns HTTP 402 with x402 payment details (USDC on Base Sepolia / Base)
+  -H "Content-Type: application/json" \
+  -d '{"tx_hash":"0x..."}' \
+  https://budget-governor.billowing-glade-3692.workers.dev/v1/account/topup-verify/starter
 ```
-
-Pay with any x402-compatible wallet. Balance is credited automatically on settlement.
 
 ### 3. Set an envelope for your agent
 
@@ -104,7 +113,9 @@ All endpoints (except `POST /v1/account`) require `Authorization: Bearer bg_YOUR
 |---|---|---|
 | `POST` | `/v1/account` | Provision account — returns `api_key` |
 | `GET` | `/v1/account/balance` | Current credit balance |
-| `POST` | `/v1/account/topup/:pack` | x402-gated credit top-up |
+| `GET` | `/v1/packs/:pack/info` | Public — pack details, USDC address, raw amount |
+| `POST` | `/v1/account/topup-verify/:pack` | Submit tx hash → verify on-chain → credit account |
+| `POST` | `/v1/account/topup/:pack` | x402-gated credit top-up (machine clients) |
 
 ### Budget
 
@@ -130,13 +141,13 @@ Denial reasons: `no_credits` · `no_envelope` · `envelope_exceeded`
 
 ## Credit packs
 
-Top up via `POST /v1/account/topup/:pack`. Payment is USDC on Base (or Base Sepolia for testnet).
+Top up at `GET /pay/:pack?api_key=bg_YOUR_KEY`. Send USDC on Base mainnet — credits added after on-chain verification.
 
-| Pack | Price | Clearances |
-|---|---|---|
-| `starter` | $19 | ~10k/month |
-| `growth` | $39 | ~30k/month |
-| `studio` | $79 | ~100k/month |
+| Pack | Price | Clearances | Link |
+|---|---|---|---|
+| `starter` | $19 | ~10k/month | `/pay/starter` |
+| `growth` | $39 | ~30k/month | `/pay/growth` |
+| `studio` | $79 | ~100k/month | `/pay/studio` |
 
 ---
 
@@ -160,4 +171,4 @@ Model pricing is a static lookup on the hot path — no external calls. Includes
 | `eip155:84532` | Base Sepolia | Testnet — safe for development |
 | `eip155:8453` | Base mainnet | Real USDC |
 
-Current deployment: Base Sepolia (testnet).
+Current deployment: Base mainnet.

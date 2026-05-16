@@ -240,6 +240,16 @@ function payPage(d: PageData): string {
     <button class="btn btn-primary" onclick="verifyPayment()">Verify &amp; Credit my account</button>
 
     <div class="status" id="status"></div>
+    <div id="next-steps" style="display:none;margin-top:14px">
+      <hr class="divider">
+      <div class="step-label">What's next</div>
+      <ol class="instructions" style="margin-top:8px">
+        <li>Set a spend cap for your agent — <code style="font-size:0.78rem;color:#a78bfa">PUT /v1/budget/envelope</code></li>
+        <li>Call <code style="font-size:0.78rem;color:#a78bfa">budget_clear</code> before each LLM request</li>
+        <li>Or add the MCP server to Claude Desktop / Claude Code:</li>
+      </ol>
+      <div class="mono" id="mcp-cmd" style="margin-top:10px;white-space:pre;font-size:0.75rem;overflow-x:auto"></div>
+    </div>
   </div>
 
   <p style="font-size:0.78rem;color:#333;text-align:center;margin-top:20px">
@@ -291,6 +301,9 @@ async function verifyPayment() {
     const data = await res.json();
     if (res.ok) {
       showStatus('Credited! New balance: $' + data.balance_usd.toFixed(2) + ' USD', 'ok');
+      document.getElementById('mcp-cmd').textContent =
+        'claude mcp add budget-governor --transport http \\\n  "https://budget-governor.billowing-glade-3692.workers.dev/mcp?api_key=' + apiKey + '"';
+      document.getElementById('next-steps').style.display = 'block';
     } else {
       const msgs = {
         already_used: 'This transaction has already been used.',
