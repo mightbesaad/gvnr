@@ -27,17 +27,26 @@ app.get('/', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Budget Governor</title>
+  <title>Budget Governor — AI agent spend caps</title>
+  <meta name="description" content="Hard spend cap for autonomous AI agents. One MCP call before each LLM request stops runaway billing before it starts.">
+  <meta property="og:title" content="Budget Governor">
+  <meta property="og:description" content="Hard spend cap for autonomous AI agents. One MCP call before each LLM request — stops runaway billing before it starts.">
+  <meta property="og:url" content="https://budget-governor.billowing-glade-3692.workers.dev">
+  <meta property="og:type" content="website">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 48px 24px; min-height: 100vh; }
     .container { max-width: 640px; margin: 0 auto; }
     h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 6px; }
-    .tagline { color: #888; font-size: 0.95rem; margin-bottom: 40px; }
-    .status { display: flex; align-items: center; gap: 10px; margin-bottom: 40px; }
+    .tagline { color: #888; font-size: 0.95rem; margin-bottom: 6px; }
+    .value-prop { color: #aaa; font-size: 0.85rem; margin-bottom: 24px; }
+    .header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 36px; flex-wrap: wrap; }
+    .status { display: flex; align-items: center; gap: 10px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
     .status-text { font-size: 0.9rem; color: #aaa; }
     .status-text strong { color: #e5e5e5; }
+    .cta-btn { display: inline-block; background: #4f46e5; color: #fff; text-decoration: none; padding: 8px 18px; border-radius: 6px; font-size: 0.85rem; font-weight: 500; white-space: nowrap; transition: opacity 0.15s; }
+    .cta-btn:hover { opacity: 0.85; }
     section { margin-bottom: 36px; }
     h2 { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #555; margin-bottom: 14px; }
     .tools { display: flex; flex-direction: column; gap: 10px; }
@@ -46,23 +55,61 @@ app.get('/', (c) => {
     .tool-desc { font-size: 0.85rem; color: #888; }
     pre { background: #111; border: 1px solid #1f1f1f; border-radius: 8px; padding: 16px; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem; color: #ccc; overflow-x: auto; line-height: 1.6; }
     .network-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 0.78rem; font-family: monospace; background: #1a1a2e; color: #818cf8; border: 1px solid #2a2a4a; }
-    .packs { display: flex; gap: 10px; flex-wrap: wrap; }
+    .packs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
     .pack { display: block; background: #111; border: 1px solid #1f1f1f; border-radius: 8px; padding: 16px 18px; text-decoration: none; color: inherit; flex: 1; min-width: 150px; transition: border-color 0.15s; }
-    .pack:hover { border-color: #3f3f3f; }
+    .pack:hover { border-color: #4f46e5; }
     .pack-name { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.85rem; color: #a78bfa; margin-bottom: 4px; }
     .pack-price { font-size: 1.25rem; font-weight: 700; color: #e5e5e5; margin-bottom: 4px; }
     .pack-detail { font-size: 0.82rem; color: #555; }
+    .key-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+    .key-input { flex: 1; background: #0f0f0f; border: 1px solid #222; border-radius: 6px; padding: 8px 12px; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.82rem; color: #ccc; outline: none; transition: border-color 0.15s; }
+    .key-input:focus { border-color: #4f46e5; }
+    .key-input::placeholder { color: #444; }
+    footer { border-top: 1px solid #1a1a1a; margin-top: 48px; padding-top: 24px; }
+    .footer-row { display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.78rem; color: #444; line-height: 1.8; }
+    .footer-row a { color: #555; text-decoration: none; }
+    .footer-row a:hover { color: #888; }
+    .footer-mono { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.72rem; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Budget Governor</h1>
     <p class="tagline">Hard spend cap for autonomous AI agents — one call, before the LLM request.</p>
+    <p class="value-prop">Stop runaway billing before it starts. Set a $5/day cap per agent, get approved or denied in one MCP call.</p>
 
-    <div class="status">
-      <div class="dot"></div>
-      <div class="status-text"><strong>Live</strong> &nbsp;·&nbsp; <span class="network-badge">${network}</span></div>
+    <div class="header-row">
+      <div class="status">
+        <div class="dot"></div>
+        <div class="status-text"><strong>Live</strong> &nbsp;·&nbsp; <span class="network-badge">${network}</span></div>
+      </div>
+      <a class="cta-btn" href="#pricing">Top up credits →</a>
     </div>
+
+    <section id="pricing">
+      <h2>Credit packs</h2>
+      <div class="packs">
+        <a class="pack" href="/pay/starter" data-base="/pay/starter">
+          <div class="pack-name">starter</div>
+          <div class="pack-price">$19</div>
+          <div class="pack-detail">~10k clearances / month</div>
+        </a>
+        <a class="pack" href="/pay/growth" data-base="/pay/growth">
+          <div class="pack-name">growth</div>
+          <div class="pack-price">$39</div>
+          <div class="pack-detail">~30k clearances / month</div>
+        </a>
+        <a class="pack" href="/pay/studio" data-base="/pay/studio">
+          <div class="pack-name">studio</div>
+          <div class="pack-price">$79</div>
+          <div class="pack-detail">~100k clearances / month</div>
+        </a>
+      </div>
+      <div class="key-row">
+        <input class="key-input" id="api-key-input" type="text" placeholder="Paste your API key (bg_...) to pre-fill payment links" autocomplete="off" spellcheck="false">
+      </div>
+      <p style="font-size:0.78rem;color:#333;margin-top:8px">Pay with USDC on Base mainnet. Credits added immediately after on-chain verification.</p>
+    </section>
 
     <section>
       <h2>MCP Tools</h2>
@@ -118,31 +165,33 @@ gpt-4o                $2.50 / $10.00
 gpt-4o-mini           $0.15 /  $0.60
 gemini-1-5-pro        $1.25 /  $3.50
 (unknown model)      $15.00 / $15.00  conservative default</pre>
-      <p style="font-size:0.8rem;color:#555;margin-top:10px">budget_clear deducts the estimated output cost. Unused tokens are not charged.</p>
+      <p style="font-size:0.8rem;color:#555;margin-top:10px">budget_clear deducts estimated output cost. Unused tokens are not charged.</p>
     </section>
 
-    <section>
-      <h2>Credit packs</h2>
-      <div class="packs">
-        <a class="pack" href="/pay/starter">
-          <div class="pack-name">starter</div>
-          <div class="pack-price">$19</div>
-          <div class="pack-detail">~10k clearances / month</div>
-        </a>
-        <a class="pack" href="/pay/growth">
-          <div class="pack-name">growth</div>
-          <div class="pack-price">$39</div>
-          <div class="pack-detail">~30k clearances / month</div>
-        </a>
-        <a class="pack" href="/pay/studio">
-          <div class="pack-name">studio</div>
-          <div class="pack-price">$79</div>
-          <div class="pack-detail">~100k clearances / month</div>
-        </a>
+    <footer>
+      <div class="footer-row">
+        <span>USDC receiver: <span class="footer-mono">0xBcF326ff22CDEc10Ca4F8AE9415Bb6884a0c26D3</span></span>
+        <span>·</span>
+        <span>Network: Base mainnet (eip155:8453)</span>
+        <span>·</span>
+        <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
       </div>
-      <p style="font-size:0.8rem;color:#555;margin-top:12px">Pay with USDC on Base mainnet. Credits are added immediately after on-chain verification.</p>
-    </section>
+    </footer>
   </div>
+
+<script>
+(function () {
+  var input = document.getElementById('api-key-input');
+  var packs = document.querySelectorAll('.pack[data-base]');
+  input.addEventListener('input', function () {
+    var key = this.value.trim();
+    packs.forEach(function (p) {
+      var base = p.getAttribute('data-base');
+      p.href = key ? base + '?api_key=' + encodeURIComponent(key) : base;
+    });
+  });
+})();
+</script>
 </body>
 </html>`;
   return c.html(html);
