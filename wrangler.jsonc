@@ -1,0 +1,20 @@
+{
+	"name": "budget-governor",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-05-16",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true,
+	},
+	"kv_namespaces": [
+		{
+			"binding": "BUDGET_KV",
+			"id": "c930f28459634846895869eb7de7dae8",
+			"preview_id": "2ec0b390f49f4503b86820b9e5a6cc1a",
+		},
+	],
+	"vars": {
+		"PAYTO_ADDRESS": "0xBcF326ff22CDEc10Ca4F8AE9415Bb6884a0c26D3",
+		"X402_NETWORK": "eip155:84532",
+	},
+}
