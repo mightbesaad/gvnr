@@ -154,7 +154,7 @@ function payPage(d: PageData): string {
     .field-label{font-size:0.75rem;color:#777;margin-bottom:5px;margin-top:14px}
     .field-label:first-of-type{margin-top:0}
     .copy-row{display:flex;gap:8px;align-items:center}
-    .mono{font-family:"SF Mono","Fira Code",monospace;font-size:0.82rem;color:#ccc;background:#0f0f0f;border:1px solid #222;border-radius:6px;padding:9px 12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .mono{font-family:"SF Mono","Fira Code",monospace;font-size:0.82rem;color:#ccc;background:#0f0f0f;border:1px solid #222;border-radius:6px;padding:9px 12px;flex:1;overflow-wrap:break-word;word-break:break-all;white-space:normal}
     .btn{border:none;border-radius:6px;padding:9px 14px;font-size:0.82rem;font-weight:500;cursor:pointer;transition:opacity 0.15s}
     .btn:hover{opacity:0.85}
     .btn-copy{background:#1a1a2e;color:#a78bfa;border:1px solid #2a2a4a;white-space:nowrap}
