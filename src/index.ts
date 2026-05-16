@@ -5,6 +5,7 @@ import { mcpHandler } from './routes/mcp';
 import accountRoutes from './routes/account';
 import envelopeRoutes from './routes/envelope';
 import budgetRoutes from './routes/budget';
+import { getAccount, getBalance, setBalance } from './lib/kv';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -104,6 +105,30 @@ studio   $79 / month   ~100k clearances</pre>
 </body>
 </html>`;
   return c.html(html);
+});
+
+// Admin: seed credits for beta users — requires X-Admin-Secret header
+app.post('/v1/admin/seed', async (c) => {
+  const secret = c.req.header('X-Admin-Secret');
+  if (!secret || secret !== c.env.ADMIN_SECRET) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
+
+  const body = await c.req.json<{ api_key: string; amount_usd: number }>();
+  if (!body.api_key || typeof body.amount_usd !== 'number' || !Number.isFinite(body.amount_usd) || body.amount_usd <= 0) {
+    return c.json({ error: 'invalid_params', required: ['api_key', 'amount_usd'] }, 400);
+  }
+
+  const account = await getAccount(c.env.BUDGET_KV, body.api_key);
+  if (!account) {
+    return c.json({ error: 'account_not_found' }, 404);
+  }
+
+  const current = await getBalance(c.env.BUDGET_KV, account.account_id);
+  const newBalance = (current?.balance_usd ?? 0) + body.amount_usd;
+  await setBalance(c.env.BUDGET_KV, account.account_id, { balance_usd: newBalance, updated_at: Date.now() });
+
+  return c.json({ ok: true, api_key: body.api_key, credited: body.amount_usd, balance_usd: newBalance });
 });
 
 // x402 payment gate — must run before account routes so topup/:pack sees payment verification.
