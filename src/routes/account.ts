@@ -11,13 +11,10 @@ const account = new Hono<{ Bindings: Env; Variables: Variables }>();
 // POST /v1/account — provision a new account, returns api_key
 account.post('/', async (c) => {
   const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
-  const hourBucket = Math.floor(Date.now() / 3_600_000);
-  const rlKey = `ratelimit:newacct:${ip}:${hourBucket}`;
-  const count = Number(await c.env.BUDGET_KV.get(rlKey) ?? '0');
-  if (count >= 10) {
+  const { success } = await c.env.ACCOUNT_RATE_LIMITER.limit({ key: ip });
+  if (!success) {
     return c.json({ error: 'rate_limited', retry_after: 'next_hour' }, 429);
   }
-  await c.env.BUDGET_KV.put(rlKey, String(count + 1), { expirationTtl: 7200 });
 
   const accountId = crypto.randomUUID();
   const apiKey = `bg_${crypto.randomUUID().replace(/-/g, '')}`;

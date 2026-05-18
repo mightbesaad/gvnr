@@ -54,7 +54,9 @@ export class AccountState extends DurableObject<DoEnv> {
   }
 
   async runClearance(agentId: string, model: string, estimatedTokens: number): Promise<ClearanceResult> {
-    if (this.balance <= 0) {
+    const estimatedCost = estimateCostUsd(model, estimatedTokens);
+
+    if (this.balance < estimatedCost) {
       return { approved: false, remaining_usd: 0, reason: 'no_credits' };
     }
 
@@ -69,7 +71,6 @@ export class AccountState extends DurableObject<DoEnv> {
       env.reset_at = nextDailyReset();
     }
 
-    const estimatedCost = estimateCostUsd(model, estimatedTokens);
     const remaining = env.limit_usd - env.spent_usd;
 
     if (estimatedCost > remaining) {
@@ -77,8 +78,10 @@ export class AccountState extends DurableObject<DoEnv> {
     }
 
     env.spent_usd += estimatedCost;
+    this.balance = roundUsd(this.balance - estimatedCost);
     this.envelopes.set(agentId, env);
     await this.ctx.storage.put('envelopes', Object.fromEntries(this.envelopes));
+    await this.ctx.storage.put('balance', this.balance);
 
     return { approved: true, remaining_usd: roundUsd(env.limit_usd - env.spent_usd) };
   }

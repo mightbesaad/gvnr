@@ -253,9 +253,48 @@ describe('POST /v1/budget/clear', () => {
     expect(body.remaining_usd).toBeLessThan(5);
   });
 
-  it('denies with envelope_exceeded when cost exceeds remaining', async () => {
+  it('denies with no_credits when balance is insufficient for estimated cost', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 0.05); // $0.05 — below cost of 10K sonnet tokens ($0.15)
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', limit_usd: 10 }),
+    });
+    const res = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', model: 'claude-sonnet-4-6', estimated_tokens: 10_000 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ approved: boolean; reason: string }>();
+    expect(body.approved).toBe(false);
+    expect(body.reason).toBe('no_credits');
+  });
+
+  it('deducts balance on approval', async () => {
     const { apiKey } = await provisionAccount();
     await seedCredits(apiKey, 10);
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', limit_usd: 10 }),
+    });
+    await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', model: 'claude-sonnet-4-6', estimated_tokens: 1000 }),
+    });
+    const balRes = await SELF.fetch('http://localhost/v1/account/balance', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    const { balance_usd } = await balRes.json<{ balance_usd: number }>();
+    expect(balance_usd).toBeLessThan(10);
+  });
+
+  it('denies with envelope_exceeded when cost exceeds remaining', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10); // $10 covers 100K tokens ($1.50) but envelope is $0.001
     await SELF.fetch('http://localhost/v1/budget/envelope', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -264,7 +303,7 @@ describe('POST /v1/budget/clear', () => {
     const res = await SELF.fetch('http://localhost/v1/budget/clear', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: 'test-agent', model: 'claude-sonnet-4-6', estimated_tokens: 1000000 }),
+      body: JSON.stringify({ agent_id: 'test-agent', model: 'claude-sonnet-4-6', estimated_tokens: 100_000 }),
     });
     expect(res.status).toBe(200);
     const body = await res.json<{ approved: boolean; reason: string }>();

@@ -23,6 +23,14 @@
 		"PAYTO_ADDRESS": "0xBcF326ff22CDEc10Ca4F8AE9415Bb6884a0c26D3",
 		"X402_NETWORK": "eip155:8453",
 	},
+	"unsafe": {
+		"bindings": [{
+			"name": "ACCOUNT_RATE_LIMITER",
+			"type": "ratelimit",
+			"namespace_id": "1001",
+			"simple": { "limit": 10, "period": 3600 },
+		}],
+	},
 	"routes": [
 		{ "pattern": "gvnr.dev", "custom_domain": true },
 		{ "pattern": "www.gvnr.dev", "custom_domain": true },
