@@ -1,6 +1,6 @@
 # Budget Governor — Deploy Runbook
 
-Engineering deploy to Cloudflare Workers. Not a product launch — no custom domain, no x402 monitoring setup required.
+Deploy to Cloudflare Workers.
 
 ---
 
@@ -110,7 +110,7 @@ Output will include the deployed URL, e.g. `https://budget-governor.<subdomain>.
 Replace `$URL` and `$KEY` in the commands below.
 
 ```bash
-URL=https://budget-governor.<subdomain>.workers.dev
+URL=https://your-worker.workers.dev
 ```
 
 **Health**

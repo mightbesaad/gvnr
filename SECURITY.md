@@ -2,11 +2,9 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability, please do not open a public GitHub issue.
+Open a GitHub issue: https://github.com/mightbesaad/gvnr/issues
 
-GitHub Issues: https://github.com/mightbesaad/gvnr/issues
-
-Include a description of the issue, steps to reproduce, and any relevant context. You will receive a response within 48 hours.
+Include a description of the issue, steps to reproduce, and any relevant context.
 
 ## Scope
 
