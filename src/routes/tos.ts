@@ -65,7 +65,7 @@ tos.get('/', (c) => {
       <h2>Privacy</h2>
       <p>We store the following in Cloudflare KV:</p>
       <ul>
-        <li><strong>API keys</strong> — randomly generated tokens (<code>bg_</code> + 32 hex chars). No name, email, or identity attached.</li>
+        <li><strong>API keys</strong> — randomly generated tokens (<code>bg_</code> + 32 hex chars) returned to you once. Only a SHA-256 hash is stored — the plaintext key is never persisted.</li>
         <li><strong>Account UUIDs</strong> — random identifiers linked to your API key.</li>
         <li><strong>Credit balance</strong> — USD amount and timestamp of last update.</li>
         <li><strong>Spend envelopes</strong> — per-agent budget limits and current spend totals you configure.</li>

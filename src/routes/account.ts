@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../lib/types';
-import { keys } from '../lib/kv';
+import { keys, hashApiKey } from '../lib/kv';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
 import { PACKS, type PackName } from '../lib/x402';
 
@@ -21,8 +21,9 @@ account.post('/', async (c) => {
 
   const accountId = crypto.randomUUID();
   const apiKey = `bg_${crypto.randomUUID().replace(/-/g, '')}`;
+  const keyHash = await hashApiKey(apiKey);
 
-  await c.env.BUDGET_KV.put(keys.api(apiKey), JSON.stringify({ account_id: accountId }));
+  await c.env.BUDGET_KV.put(keys.api(keyHash), JSON.stringify({ account_id: accountId }));
 
   return c.json({ api_key: apiKey, account_id: accountId }, 201);
 });

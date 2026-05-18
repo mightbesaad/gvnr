@@ -1,14 +1,20 @@
 import type { AccountRecord, BalanceRecord, EnvelopeRecord } from './types';
 
+export async function hashApiKey(key: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 // Key builders
 export const keys = {
-  api: (apiKey: string) => `api:${apiKey}`,
+  api: (hash: string) => `api:${hash}`,
   balance: (accountId: string) => `account:${accountId}:balance`,
   envelope: (accountId: string, agentId: string) => `envelope:${accountId}:${agentId}`,
 };
 
 export async function getAccount(kv: KVNamespace, apiKey: string): Promise<AccountRecord | null> {
-  return kv.get<AccountRecord>(keys.api(apiKey), 'json');
+  const hash = await hashApiKey(apiKey);
+  return kv.get<AccountRecord>(keys.api(hash), 'json');
 }
 
 export async function getBalance(kv: KVNamespace, accountId: string): Promise<BalanceRecord | null> {
