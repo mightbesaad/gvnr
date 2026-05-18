@@ -86,6 +86,9 @@ pay.get('/pay/:pack', async (c) => {
   const apiKey = rawApiKey;
   const rawAmount = packToRawAmount(pack.amount_usd);
 
+  c.header('X-Frame-Options', 'DENY');
+  c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
+  c.header('X-Content-Type-Options', 'nosniff');
   return c.html(payPage({
     packName,
     amountUsd: pack.amount_usd,
@@ -314,7 +317,7 @@ async function verifyPayment() {
     if (res.ok) {
       showStatus('Credited! New balance: $' + data.balance_usd.toFixed(2) + ' USD', 'ok');
       document.getElementById('mcp-cmd').textContent =
-        'claude mcp add budget-governor --transport http \\\n  "https://budget-governor.billowing-glade-3692.workers.dev/mcp?api_key=' + apiKey + '"';
+        'claude mcp add budget-governor --transport http \\\n  "https://gvnr.dev/mcp?api_key=' + apiKey + '"';
       document.getElementById('next-steps').style.display = 'block';
     } else {
       const msgs = {
@@ -337,7 +340,7 @@ async function verifyPayment() {
   if (new URLSearchParams(location.search).get('preview') === 'success') {
     showStatus('[preview mode] — simulating post-payment success state', 'info');
     document.getElementById('mcp-cmd').textContent =
-      'claude mcp add budget-governor --transport http \\\n  "https://budget-governor.billowing-glade-3692.workers.dev/mcp?api_key=bg_YOUR_KEY"';
+      'claude mcp add budget-governor --transport http \\\n  "https://gvnr.dev/mcp?api_key=bg_YOUR_KEY"';
     document.getElementById('next-steps').style.display = 'block';
   }
 })();

@@ -23,6 +23,8 @@ app.get('/health', (c) => c.json({ ok: true }));
 
 app.get('/', (c) => {
   const network = c.env.X402_NETWORK === 'eip155:8453' ? 'Base mainnet' : 'Base Sepolia (testnet)';
+  c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
+  c.header('X-Content-Type-Options', 'nosniff');
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,7 +34,7 @@ app.get('/', (c) => {
   <meta name="description" content="Hard spend cap for autonomous AI agents. One MCP call before each LLM request stops runaway billing before it starts.">
   <meta property="og:title" content="Budget Governor">
   <meta property="og:description" content="Hard spend cap for autonomous AI agents. One MCP call before each LLM request — stops runaway billing before it starts.">
-  <meta property="og:url" content="https://budget-governor.billowing-glade-3692.workers.dev">
+  <meta property="og:url" content="https://gvnr.dev">
   <meta property="og:type" content="website">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -133,12 +135,12 @@ app.get('/', (c) => {
     <section>
       <h2>Quick start</h2>
       <pre># 1. Provision an account
-curl -X POST https://budget-governor.billowing-glade-3692.workers.dev/v1/account
+curl -X POST https://gvnr.dev/v1/account
 # → { "api_key": "bg_...", "account_id": "..." }</pre>
 
       <p style="font-size:0.8rem;color:#888;margin:10px 0 6px"># 2. Top up credits — open in your browser</p>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
-        <div style="font-family:'SF Mono','Fira Code',monospace;font-size:0.78rem;color:#ccc;background:#111;border:1px solid #1f1f1f;border-radius:8px;padding:10px 12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="qs-url">https://budget-governor.billowing-glade-3692.workers.dev/pay/starter?api_key=bg_YOUR_KEY</div>
+        <div style="font-family:'SF Mono','Fira Code',monospace;font-size:0.78rem;color:#ccc;background:#111;border:1px solid #1f1f1f;border-radius:8px;padding:10px 12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="qs-url">https://gvnr.dev/pay/starter?api_key=bg_YOUR_KEY</div>
         <button onclick="(function(b){navigator.clipboard.writeText(document.getElementById('qs-url').textContent).then(()=>{var t=b.textContent;b.textContent='Copied!';setTimeout(()=>b.textContent=t,1500)})})(this)" style="border:none;border-radius:6px;padding:9px 14px;font-size:0.82rem;font-weight:500;cursor:pointer;background:#1a1a2e;color:#a78bfa;border:1px solid #2a2a4a;white-space:nowrap">Copy</button>
       </div>
 
@@ -147,14 +149,14 @@ curl -X PUT \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"agent_id":"my-agent","limit_usd":5,"window":"daily"}' \\
-  https://budget-governor.billowing-glade-3692.workers.dev/v1/budget/envelope
+  https://gvnr.dev/v1/budget/envelope
 
 # 4. Call before each LLM request
 curl -X POST \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"agent_id":"my-agent","model":"claude-sonnet-4-6","estimated_tokens":2000}' \\
-  https://budget-governor.billowing-glade-3692.workers.dev/v1/budget/clear</pre>
+  https://gvnr.dev/v1/budget/clear</pre>
     </section>
 
     <section>

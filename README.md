@@ -30,7 +30,7 @@ The envelope is configured by you (per-agent daily or session cap). The credit b
 ### 1. Provision an account
 
 ```bash
-curl -X POST https://budget-governor.billowing-glade-3692.workers.dev/v1/account
+curl -X POST https://gvnr.dev/v1/account
 # { "api_key": "bg_...", "account_id": "..." }
 ```
 
@@ -39,7 +39,7 @@ curl -X POST https://budget-governor.billowing-glade-3692.workers.dev/v1/account
 Open the payment page for your chosen pack, pass your API key as a query param:
 
 ```
-https://budget-governor.billowing-glade-3692.workers.dev/pay/starter?api_key=bg_YOUR_KEY
+https://gvnr.dev/pay/starter?api_key=bg_YOUR_KEY
 ```
 
 Send USDC on Base to the address shown, paste your tx hash — credits are added after on-chain verification.
@@ -51,7 +51,7 @@ curl -X POST \
   -H "Authorization: Bearer bg_YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{"tx_hash":"0x..."}' \
-  https://budget-governor.billowing-glade-3692.workers.dev/v1/account/topup-verify/starter
+  https://gvnr.dev/v1/account/topup-verify/starter
 ```
 
 ### 3. Set an envelope for your agent
@@ -61,7 +61,7 @@ curl -X PUT \
   -H "Authorization: Bearer bg_YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{"agent_id":"my-agent","limit_usd":5,"window":"daily"}' \
-  https://budget-governor.billowing-glade-3692.workers.dev/v1/budget/envelope
+  https://gvnr.dev/v1/budget/envelope
 # { "success": true, "agent_id": "my-agent", "limit_usd": 5, "window": "daily" }
 ```
 
@@ -72,7 +72,7 @@ curl -X POST \
   -H "Authorization: Bearer bg_YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{"agent_id":"my-agent","model":"claude-sonnet-4-6","estimated_tokens":2000}' \
-  https://budget-governor.billowing-glade-3692.workers.dev/v1/budget/clear
+  https://gvnr.dev/v1/budget/clear
 # { "approved": true, "remaining_usd": 4.994 }
 ```
 
@@ -83,14 +83,14 @@ curl -X POST \
 Add to Claude Desktop or any MCP-compatible client:
 
 ```
-https://budget-governor.billowing-glade-3692.workers.dev/mcp?api_key=bg_YOUR_KEY
+https://gvnr.dev/mcp?api_key=bg_YOUR_KEY
 ```
 
 ### Claude Code
 
 ```bash
 claude mcp add budget-governor --transport http \
-  "https://budget-governor.billowing-glade-3692.workers.dev/mcp?api_key=bg_YOUR_KEY"
+  "https://gvnr.dev/mcp?api_key=bg_YOUR_KEY"
 ```
 
 ### MCP tools
@@ -179,4 +179,4 @@ Current deployment: Base mainnet.
 
 MIT — see [LICENSE](LICENSE).
 
-The canonical hosted service is at `https://budget-governor.billowing-glade-3692.workers.dev`. Self-hosted instances are unaffiliated.
+The canonical hosted service is at `https://gvnr.dev`. Self-hosted instances are unaffiliated.

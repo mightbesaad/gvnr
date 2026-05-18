@@ -4,6 +4,9 @@ import type { Env } from '../lib/types';
 const tos = new Hono<{ Bindings: Env }>();
 
 tos.get('/', (c) => {
+  c.header('X-Frame-Options', 'DENY');
+  c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'");
+  c.header('X-Content-Type-Options', 'nosniff');
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
