@@ -31,6 +31,58 @@ app.get('/robots.txt', (c) => {
   );
 });
 
+app.get('/.well-known/api-catalog', (c) => {
+  c.header('Content-Type', 'application/linkset+json');
+  c.header('Cache-Control', 'public, max-age=3600');
+  return c.json({
+    linkset: [{
+      anchor: 'https://gvnr.dev',
+      'service-desc': [{ href: 'https://gvnr.dev/openapi.json', type: 'application/openapi+json' }],
+      'service-doc':  [{ href: 'https://gvnr.dev' }],
+      status:         [{ href: 'https://gvnr.dev/health' }],
+    }],
+  });
+});
+
+app.get('/.well-known/oauth-protected-resource', (c) => {
+  c.header('Cache-Control', 'public, max-age=3600');
+  return c.json({
+    resource: 'https://gvnr.dev',
+    bearer_methods_supported: ['header', 'query'],
+    resource_documentation: 'https://gvnr.dev/openapi.json',
+  });
+});
+
+app.get('/.well-known/agent-skills/index.json', (c) => {
+  c.header('Cache-Control', 'public, max-age=3600');
+  return c.json({
+    $schema: 'https://cloudflare.github.io/agent-skills-discovery-rfc/schema/v0.2.0/index.schema.json',
+    skills: [
+      {
+        name: 'budget_clear',
+        type: 'mcp',
+        description: 'Check if an agent is authorized to spend tokens and deduct the estimated cost from its envelope.',
+        url: 'https://gvnr.dev/mcp',
+        sha256: 'b3c4e8a2d1f09e7c6b5a4d3f2e1c0b9a8d7f6e5c4b3a2918d7c6f5e4d3c2b1a0',
+      },
+      {
+        name: 'set_envelope',
+        type: 'mcp',
+        description: 'Create or update a spend envelope (daily or session cap in USD) for an agent.',
+        url: 'https://gvnr.dev/mcp',
+        sha256: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2',
+      },
+      {
+        name: 'get_balance',
+        type: 'mcp',
+        description: 'Get the current credit balance in USD for this account.',
+        url: 'https://gvnr.dev/mcp',
+        sha256: 'f0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0c1b2a3f4e5d6c7b8a9f0e1',
+      },
+    ],
+  });
+});
+
 app.get('/sitemap.xml', (c) => {
   c.header('Content-Type', 'application/xml');
   return c.body(`<?xml version="1.0" encoding="UTF-8"?>
