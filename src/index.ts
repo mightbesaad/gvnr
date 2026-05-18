@@ -23,7 +23,121 @@ app.onError((err, c) => {
 app.get('/health', (c) => c.json({ ok: true }));
 
 app.get('/robots.txt', (c) => {
-  return c.text('User-agent: *\nDisallow: /v1/\nDisallow: /admin/\n');
+  return c.text(
+    'User-agent: GPTBot\nAllow: /\nDisallow: /v1/\nDisallow: /admin/\n\n' +
+    'User-agent: ClaudeBot\nAllow: /\nDisallow: /v1/\nDisallow: /admin/\n\n' +
+    'User-agent: PerplexityBot\nAllow: /\nDisallow: /v1/\nDisallow: /admin/\n\n' +
+    'User-agent: *\nDisallow: /v1/\nDisallow: /admin/\n\nSitemap: https://gvnr.dev/sitemap.xml\n',
+  );
+});
+
+app.get('/sitemap.xml', (c) => {
+  c.header('Content-Type', 'application/xml');
+  return c.body(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://gvnr.dev/</loc></url>
+  <url><loc>https://gvnr.dev/tos</loc></url>
+  <url><loc>https://gvnr.dev/pay/starter</loc></url>
+  <url><loc>https://gvnr.dev/pay/growth</loc></url>
+  <url><loc>https://gvnr.dev/pay/studio</loc></url>
+</urlset>`);
+});
+
+app.get('/.well-known/mcp.json', (c) => {
+  c.header('Cache-Control', 'public, max-age=3600');
+  return c.json({
+    name: 'Budget Governor',
+    description: 'Hard spend cap for autonomous AI agents. Check clearance and track spend before each LLM call.',
+    version: '1.0.0',
+    url: 'https://gvnr.dev/mcp',
+    transport: ['streamable-http'],
+    authentication: {
+      type: 'bearer',
+      description: 'API key obtained from POST https://gvnr.dev/v1/account',
+    },
+    tools: [
+      { name: 'budget_clear', description: 'Check if an agent is authorized to spend tokens and deduct the estimated cost' },
+      { name: 'set_envelope', description: 'Create or update a spend envelope for an agent' },
+      { name: 'get_balance', description: 'Get current account credit balance in USD' },
+    ],
+  });
+});
+
+app.get('/openapi.json', (c) => {
+  c.header('Cache-Control', 'public, max-age=3600');
+  return c.json({
+    openapi: '3.1.0',
+    info: { title: 'Budget Governor', version: '1.0.0', description: 'Hard spend cap for autonomous AI agents.' },
+    servers: [{ url: 'https://gvnr.dev' }],
+    components: {
+      securitySchemes: {
+        bearerAuth: { type: 'http', scheme: 'bearer', description: 'API key from POST /v1/account' },
+      },
+    },
+    paths: {
+      '/v1/account': {
+        post: {
+          summary: 'Provision account',
+          responses: { '200': { description: 'Returns api_key and account_id' } },
+        },
+      },
+      '/v1/account/balance': {
+        get: {
+          summary: 'Get credit balance',
+          security: [{ bearerAuth: [] }],
+          responses: { '200': { description: 'Returns balance_usd' } },
+        },
+      },
+      '/v1/account/topup-verify/{pack}': {
+        post: {
+          summary: 'Verify on-chain USDC payment and credit account',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'pack', in: 'path', required: true, schema: { type: 'string', enum: ['starter', 'growth', 'studio'] } }],
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { tx_hash: { type: 'string' } }, required: ['tx_hash'] } } } },
+          responses: { '200': { description: 'Credits added, returns balance_usd' } },
+        },
+      },
+      '/v1/budget/clear': {
+        post: {
+          summary: 'Clearance call — approve or deny agent spend',
+          security: [{ bearerAuth: [] }],
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, model: { type: 'string' }, estimated_tokens: { type: 'integer' } }, required: ['agent_id', 'model', 'estimated_tokens'] } } } },
+          responses: { '200': { description: 'Returns approved (bool), remaining_usd, optional reason' } },
+        },
+      },
+      '/v1/budget/envelope': {
+        put: {
+          summary: 'Create or update agent spend envelope',
+          security: [{ bearerAuth: [] }],
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, limit_usd: { type: 'number' }, window: { type: 'string', enum: ['daily', 'session'] } }, required: ['agent_id', 'limit_usd'] } } } },
+          responses: { '200': { description: 'Envelope created or updated' } },
+        },
+      },
+      '/v1/budget/envelope/{agent_id}': {
+        get: {
+          summary: 'Read envelope state',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'agent_id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'Returns envelope record' } },
+        },
+      },
+      '/v1/packs/{pack}/info': {
+        get: {
+          summary: 'Get pack details and payment info',
+          parameters: [{ name: 'pack', in: 'path', required: true, schema: { type: 'string', enum: ['starter', 'growth', 'studio'] } }],
+          responses: { '200': { description: 'Returns amount, USDC address, raw amount' } },
+        },
+      },
+      '/mcp': {
+        post: {
+          summary: 'MCP server endpoint (Streamable HTTP)',
+          security: [{ bearerAuth: [] }],
+          description: 'Pass api_key as query param or Authorization: Bearer header',
+          responses: { '200': { description: 'MCP JSON-RPC response' } },
+        },
+      },
+    },
+  });
 });
 
 app.get('/favicon.ico', (c) => {
@@ -41,6 +155,7 @@ app.get('/', (c) => {
   const network = c.env.X402_NETWORK === 'eip155:8453' ? 'Base mainnet' : 'Base Sepolia (testnet)';
   c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
   c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Link', '</openapi.json>; rel="describedby", </.well-known/mcp.json>; rel="mcp"');
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -52,6 +167,9 @@ app.get('/', (c) => {
   <meta property="og:description" content="Hard spend cap for autonomous AI agents. One MCP call before each LLM request — stops runaway billing before it starts.">
   <meta property="og:url" content="https://gvnr.dev">
   <meta property="og:type" content="website">
+  <meta name="robots" content="index, follow">
+  <link rel="describedby" href="/openapi.json">
+  <link rel="mcp" href="/.well-known/mcp.json">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 48px 24px; min-height: 100vh; }
