@@ -4,7 +4,7 @@
 
 If you discover a security vulnerability, please do not open a public GitHub issue.
 
-Email: saad@gvnr.dev
+GitHub Issues: https://github.com/mightbesaad/gvnr/issues
 
 Include a description of the issue, steps to reproduce, and any relevant context. You will receive a response within 48 hours.
 
