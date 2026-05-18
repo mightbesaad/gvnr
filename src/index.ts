@@ -22,6 +22,21 @@ app.onError((err, c) => {
 
 app.get('/health', (c) => c.json({ ok: true }));
 
+app.get('/robots.txt', (c) => {
+  return c.text('User-agent: *\nDisallow: /v1/\nDisallow: /admin/\n');
+});
+
+app.get('/favicon.ico', (c) => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+    <rect width="32" height="32" rx="6" fill="#111"/>
+    <text x="16" y="22" font-family="system-ui,sans-serif" font-size="18"
+      font-weight="600" fill="#a78bfa" text-anchor="middle">G</text>
+  </svg>`;
+  c.header('Content-Type', 'image/svg+xml');
+  c.header('Cache-Control', 'public, max-age=86400');
+  return c.body(svg);
+});
+
 app.get('/', (c) => {
   const network = c.env.X402_NETWORK === 'eip155:8453' ? 'Base mainnet' : 'Base Sepolia (testnet)';
   c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");

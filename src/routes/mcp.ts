@@ -5,7 +5,6 @@ import type { Context } from 'hono';
 import type { Env } from '../lib/types';
 import { getAccount, getBalance, getEnvelope, setEnvelope } from '../lib/kv';
 import { nextDailyReset } from '../lib/models';
-import { runClearance } from '../lib/clearance';
 
 export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Response> {
   const apiKey =
@@ -37,7 +36,8 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
       },
     },
     async ({ agent_id, model, estimated_tokens }) => {
-      const result = await runClearance(kv, accountId, agent_id, model, estimated_tokens);
+      const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
+      const result = await stub.runClearance(agent_id, model, estimated_tokens);
       return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
     },
   );
