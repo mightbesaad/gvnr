@@ -174,6 +174,10 @@ function payPage(d: PageData): string {
     .divider{border:none;border-top:1px solid #1a1a1a;margin:16px 0}
     .instructions{font-size:0.83rem;color:#888;line-height:1.7;margin-top:10px}
     .instructions li{margin-left:16px}
+    footer{border-top:1px solid #1a1a1a;margin-top:32px;padding-top:20px}
+    .footer-row{display:flex;gap:16px;flex-wrap:wrap;font-size:0.78rem;color:#666;line-height:1.8;justify-content:center}
+    .footer-row a{color:#777;text-decoration:none}
+    .footer-row a:hover{color:#aaa}
   </style>
 </head>
 <body>
@@ -252,9 +256,17 @@ function payPage(d: PageData): string {
     </div>
   </div>
 
-  <p style="font-size:0.78rem;color:#666;text-align:center;margin-top:20px">
-    Need help? Check your balance at <code style="font-size:0.75rem">GET /v1/account/balance</code>
-  </p>
+  <footer>
+    <div class="footer-row">
+      <a href="/">Home</a>
+      <span>·</span>
+      <a href="/tos">Terms &amp; Refund Policy</a>
+      <span>·</span>
+      <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">Support</a>
+      <span>·</span>
+      <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </footer>
 </div>
 
 <script>
@@ -319,6 +331,16 @@ async function verifyPayment() {
     showStatus('Network error. Try again.', 'err');
   }
 }
+
+// Preview mode — ?preview=success shows post-payment UI without a real transaction
+(function () {
+  if (new URLSearchParams(location.search).get('preview') === 'success') {
+    showStatus('[preview mode] — simulating post-payment success state', 'info');
+    document.getElementById('mcp-cmd').textContent =
+      'claude mcp add budget-governor --transport http \\\n  "https://budget-governor.billowing-glade-3692.workers.dev/mcp?api_key=bg_YOUR_KEY"';
+    document.getElementById('next-steps').style.display = 'block';
+  }
+})();
 
 async function connectAndPay() {
   if (!window.ethereum) {

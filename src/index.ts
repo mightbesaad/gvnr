@@ -6,6 +6,7 @@ import accountRoutes from './routes/account';
 import envelopeRoutes from './routes/envelope';
 import budgetRoutes from './routes/budget';
 import payRoutes from './routes/pay';
+import tosRoutes from './routes/tos';
 import { getAccount, getBalance, setBalance } from './lib/kv';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -175,6 +176,10 @@ gemini-1-5-pro        $1.25 /  $3.50
         <span>Network: Base mainnet (eip155:8453)</span>
         <span>·</span>
         <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
+        <span>·</span>
+        <a href="/tos">Terms</a>
+        <span>·</span>
+        <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">Support</a>
       </div>
     </footer>
   </div>
@@ -224,6 +229,7 @@ app.post('/v1/admin/seed', async (c) => {
 // Human payment routes — mounted before x402 middleware to avoid interception.
 // /v1/packs/:pack/info, /v1/account/topup-verify/:pack, /pay/:pack
 app.route('/', payRoutes);
+app.route('/tos', tosRoutes);
 
 // x402 payment gate — must run before account routes so topup/:pack sees payment verification.
 // Initialized lazily on first request so PAYTO_ADDRESS is available from env.
