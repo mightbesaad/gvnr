@@ -14,8 +14,11 @@ export interface EnvelopeRecord {
   reset_at: number; // unix ms — next reset time for daily window
 }
 
+import type { AccountState } from './account-do';
+
 export interface Env {
   BUDGET_KV: KVNamespace;
+  ACCOUNT: DurableObjectNamespace<AccountState>;
   PAYTO_ADDRESS: string;     // USDC receiving address (0x...)
   X402_NETWORK: string;      // e.g. "eip155:8453" (Base) or "eip155:84532" (Base Sepolia)
   ADMIN_SECRET: string;      // secret header value for admin endpoints

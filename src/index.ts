@@ -7,7 +7,8 @@ import envelopeRoutes from './routes/envelope';
 import budgetRoutes from './routes/budget';
 import payRoutes from './routes/pay';
 import tosRoutes from './routes/tos';
-import { getAccount, getBalance, setBalance } from './lib/kv';
+import { getAccount } from './lib/kv';
+export { AccountState } from './lib/account-do';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -221,11 +222,10 @@ app.post('/v1/admin/seed', async (c) => {
     return c.json({ error: 'account_not_found' }, 404);
   }
 
-  const current = await getBalance(c.env.BUDGET_KV, account.account_id);
-  const newBalance = (current?.balance_usd ?? 0) + body.amount_usd;
-  await setBalance(c.env.BUDGET_KV, account.account_id, { balance_usd: newBalance, updated_at: Date.now() });
+  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(account.account_id));
+  const result = await stub.credit(body.amount_usd);
 
-  return c.json({ ok: true, api_key: body.api_key, credited: body.amount_usd, balance_usd: newBalance });
+  return c.json({ ok: true, api_key: body.api_key, credited: body.amount_usd, balance_usd: result.balance_usd });
 });
 
 // Human payment routes — mounted before x402 middleware to avoid interception.

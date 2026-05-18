@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../lib/types';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
-import { runClearance } from '../lib/clearance';
 
 type Variables = AuthVariables;
 
@@ -20,7 +19,8 @@ budget.post('/clear', async (c) => {
     return c.json({ error: 'invalid_params', required: ['agent_id (string, max 128 chars)', 'model', 'estimated_tokens (finite int > 0)'] }, 400);
   }
 
-  const result = await runClearance(c.env.BUDGET_KV, accountId, body.agent_id, body.model, body.estimated_tokens);
+  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
+  const result = await stub.runClearance(body.agent_id, body.model, body.estimated_tokens);
   return c.json(result);
 });
 

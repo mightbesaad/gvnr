@@ -41,11 +41,12 @@ async function provisionAccount(): Promise<{ apiKey: string; accountId: string }
   return { apiKey: body.api_key, accountId: body.account_id };
 }
 
-async function seedCredits(accountId: string, balanceUsd: number) {
-  await env.BUDGET_KV.put(
-    `account:${accountId}:balance`,
-    JSON.stringify({ balance_usd: balanceUsd, updated_at: Date.now() }),
-  );
+async function seedCredits(apiKey: string, balanceUsd: number) {
+  await SELF.fetch('http://localhost/v1/admin/seed', {
+    method: 'POST',
+    headers: { 'X-Admin-Secret': 'dev-secret-local', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey, amount_usd: balanceUsd }),
+  });
 }
 
 describe('GET /health', () => {
@@ -220,8 +221,8 @@ describe('POST /v1/budget/clear', () => {
   });
 
   it('denies with no_envelope when envelope is missing', async () => {
-    const { apiKey, accountId } = await provisionAccount();
-    await seedCredits(accountId, 10);
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10);
     const res = await SELF.fetch('http://localhost/v1/budget/clear', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -234,8 +235,8 @@ describe('POST /v1/budget/clear', () => {
   });
 
   it('approves when credits and envelope are sufficient', async () => {
-    const { apiKey, accountId } = await provisionAccount();
-    await seedCredits(accountId, 10);
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10);
     await SELF.fetch('http://localhost/v1/budget/envelope', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -253,8 +254,8 @@ describe('POST /v1/budget/clear', () => {
   });
 
   it('denies with envelope_exceeded when cost exceeds remaining', async () => {
-    const { apiKey, accountId } = await provisionAccount();
-    await seedCredits(accountId, 10);
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10);
     await SELF.fetch('http://localhost/v1/budget/envelope', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },

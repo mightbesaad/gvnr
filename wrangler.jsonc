@@ -6,6 +6,12 @@
 	"observability": {
 		"enabled": true,
 	},
+	"durable_objects": {
+		"bindings": [{ "name": "ACCOUNT", "class_name": "AccountState" }],
+	},
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["AccountState"] },
+	],
 	"kv_namespaces": [
 		{
 			"binding": "BUDGET_KV",

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../lib/types';
-import { keys, getBalance, setBalance } from '../lib/kv';
+import { keys } from '../lib/kv';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
 import { PACKS, type PackName } from '../lib/x402';
 
@@ -23,7 +23,6 @@ account.post('/', async (c) => {
   const apiKey = `bg_${crypto.randomUUID().replace(/-/g, '')}`;
 
   await c.env.BUDGET_KV.put(keys.api(apiKey), JSON.stringify({ account_id: accountId }));
-  await setBalance(c.env.BUDGET_KV, accountId, { balance_usd: 0, updated_at: Date.now() });
 
   return c.json({ api_key: apiKey, account_id: accountId }, 201);
 });
@@ -31,8 +30,9 @@ account.post('/', async (c) => {
 // GET /v1/account/balance — current credit balance
 account.get('/balance', authMiddleware, async (c) => {
   const accountId = c.get('accountId');
-  const balance = await getBalance(c.env.BUDGET_KV, accountId);
-  return c.json({ balance_usd: balance?.balance_usd ?? 0 });
+  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
+  const balance = await stub.getBalance();
+  return c.json({ balance_usd: balance });
 });
 
 // POST /v1/account/topup/:pack — x402-gated credit top-up
@@ -47,11 +47,10 @@ account.post('/topup/:pack', authMiddleware, async (c) => {
   }
 
   const accountId = c.get('accountId');
-  const current = await getBalance(c.env.BUDGET_KV, accountId);
-  const newBalance = (current?.balance_usd ?? 0) + pack.amount_usd;
-  await setBalance(c.env.BUDGET_KV, accountId, { balance_usd: newBalance, updated_at: Date.now() });
+  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
+  const result = await stub.credit(pack.amount_usd);
 
-  return c.json({ balance_usd: newBalance, pack: packName, credited: pack.amount_usd });
+  return c.json({ balance_usd: result.balance_usd, pack: packName, credited: pack.amount_usd });
 });
 
 export default account;

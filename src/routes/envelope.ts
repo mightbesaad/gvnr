@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import type { Env } from '../lib/types';
-import { getEnvelope, setEnvelope, deleteEnvelope } from '../lib/kv';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
 import { nextDailyReset, roundUsd } from '../lib/models';
 
@@ -26,9 +25,10 @@ envelope.put('/', async (c) => {
   if (window !== 'daily' && window !== 'session') {
     return c.json({ error: 'invalid_params', detail: 'window must be "daily" or "session"' }, 400);
   }
-  const existing = await getEnvelope(c.env.BUDGET_KV, accountId, body.agent_id);
+  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
+  const existing = await stub.getEnvelope(body.agent_id);
 
-  await setEnvelope(c.env.BUDGET_KV, accountId, body.agent_id, {
+  await stub.setEnvelope(body.agent_id, {
     limit_usd: body.limit_usd,
     spent_usd: existing?.spent_usd ?? 0,
     window,
@@ -42,7 +42,8 @@ envelope.put('/', async (c) => {
 envelope.get('/:agent_id', async (c) => {
   const accountId = c.get('accountId');
   const agentId = c.req.param('agent_id');
-  const env = await getEnvelope(c.env.BUDGET_KV, accountId, agentId);
+  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
+  const env = await stub.getEnvelope(agentId);
 
   if (!env) {
     return c.json({ error: 'not_found' }, 404);
@@ -62,13 +63,13 @@ envelope.get('/:agent_id', async (c) => {
 envelope.delete('/:agent_id', async (c) => {
   const accountId = c.get('accountId');
   const agentId = c.req.param('agent_id');
-  const existing = await getEnvelope(c.env.BUDGET_KV, accountId, agentId);
+  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
+  const deleted = await stub.deleteEnvelope(agentId);
 
-  if (!existing) {
+  if (!deleted) {
     return c.json({ error: 'not_found' }, 404);
   }
 
-  await deleteEnvelope(c.env.BUDGET_KV, accountId, agentId);
   return c.json({ success: true, agent_id: agentId });
 });
 

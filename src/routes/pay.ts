@@ -3,7 +3,6 @@ import type { Env } from '../lib/types';
 import { PACKS, type PackName } from '../lib/x402';
 import { NETWORK_CONFIGS, type NetworkKey, packToRawAmount, verifyUsdcTransfer } from '../lib/chain';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
-import { getBalance, setBalance } from '../lib/kv';
 
 type Variables = AuthVariables;
 
@@ -52,18 +51,17 @@ pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
   if (alreadyUsed) return c.json({ error: 'already_used' }, 409);
 
   const expectedRaw = packToRawAmount(pack.amount_usd);
-  const result = await verifyUsdcTransfer(txHash, c.env.PAYTO_ADDRESS, expectedRaw, cfg.usdcContract, cfg.rpcUrl);
-  if (!result.ok) return c.json({ error: result.error }, 400);
+  const verification = await verifyUsdcTransfer(txHash, c.env.PAYTO_ADDRESS, expectedRaw, cfg.usdcContract, cfg.rpcUrl);
+  if (!verification.ok) return c.json({ error: verification.error }, 400);
 
   const accountId = c.get('accountId');
-  const current = await getBalance(c.env.BUDGET_KV, accountId);
-  const newBalance = (current?.balance_usd ?? 0) + pack.amount_usd;
-  await setBalance(c.env.BUDGET_KV, accountId, { balance_usd: newBalance, updated_at: Date.now() });
+  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
+  const credited = await stub.credit(pack.amount_usd);
 
   // Mark tx as used — 30-day TTL prevents replay, doesn't bloat KV forever
   await c.env.BUDGET_KV.put(txKey, '1', { expirationTtl: 2592000 });
 
-  return c.json({ balance_usd: newBalance, pack: packName, credited: pack.amount_usd });
+  return c.json({ balance_usd: credited.balance_usd, pack: packName, credited: pack.amount_usd });
 });
 
 // GET /pay/:pack — human-facing payment page
