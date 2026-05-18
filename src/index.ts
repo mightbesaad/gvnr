@@ -259,6 +259,18 @@ app.get('/', (c) => {
     .footer-row a { color: #777; text-decoration: none; }
     .footer-row a:hover { color: #aaa; }
     .footer-mono { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.72rem; color: #888; }
+    .btn-get-key { background: #1a1a2e; color: #a78bfa; border: 1px solid #2a2a4a; border-radius: 6px; padding: 8px 14px; font-size: 0.82rem; font-weight: 500; cursor: pointer; white-space: nowrap; transition: opacity 0.15s; flex-shrink: 0; }
+    .btn-get-key:hover { opacity: 0.85; }
+    .key-row { flex-wrap: wrap; }
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 100; align-items: center; justify-content: center; padding: 24px; }
+    .modal-box { background: #111; border: 1px solid #2a2a2a; border-radius: 12px; padding: 28px; max-width: 440px; width: 100%; }
+    .modal-title { font-size: 1rem; font-weight: 600; margin-bottom: 14px; }
+    .modal-warning { background: #1a0808; border: 1px solid #3a1414; color: #f87171; font-size: 0.82rem; padding: 10px 12px; border-radius: 6px; margin-bottom: 14px; line-height: 1.6; }
+    .modal-key-row { display: flex; gap: 8px; margin-bottom: 20px; }
+    .modal-key { font-family: "SF Mono","Fira Code",monospace; font-size: 0.82rem; color: #e5e5e5; background: #0f0f0f; border: 1px solid #222; border-radius: 6px; padding: 9px 12px; flex: 1; word-break: break-all; }
+    .modal-done-btn { width: 100%; background: #4f46e5; color: #fff; border: none; border-radius: 8px; padding: 11px; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
+    .modal-done-btn:hover { opacity: 0.85; }
+    pre { overflow-x: auto; }
   </style>
 </head>
 <body>
@@ -281,21 +293,22 @@ app.get('/', (c) => {
         <a class="pack" href="/pay/starter" data-base="/pay/starter">
           <div class="pack-name">starter</div>
           <div class="pack-price">$19</div>
-          <div class="pack-detail">~10k clearances / month</div>
+          <div class="pack-detail">~10k budget_clear calls / month</div>
         </a>
         <a class="pack" href="/pay/growth" data-base="/pay/growth">
           <div class="pack-name">growth</div>
           <div class="pack-price">$39</div>
-          <div class="pack-detail">~30k clearances / month</div>
+          <div class="pack-detail">~30k budget_clear calls / month</div>
         </a>
         <a class="pack" href="/pay/studio" data-base="/pay/studio">
           <div class="pack-name">studio</div>
           <div class="pack-price">$79</div>
-          <div class="pack-detail">~100k clearances / month</div>
+          <div class="pack-detail">~100k budget_clear calls / month</div>
         </a>
       </div>
       <div class="key-row">
-        <input class="key-input" id="api-key-input" type="text" placeholder="Paste your API key (bg_...) to pre-fill payment links" autocomplete="off" spellcheck="false">
+        <input class="key-input" id="api-key-input" type="text" placeholder="Paste your API key (bg_...)" autocomplete="off" spellcheck="false">
+        <button class="btn-get-key" id="get-key-btn" onclick="getApiKey()">Get API key</button>
       </div>
       <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay with USDC on Base mainnet. Credits added immediately after on-chain verification.</p>
     </section>
@@ -352,9 +365,8 @@ claude-sonnet-4-6     $3.00 / $15.00
 claude-haiku-4-5      $0.80 /  $4.00
 gpt-4o                $2.50 / $10.00
 gpt-4o-mini           $0.15 /  $0.60
-gemini-1-5-pro        $1.25 /  $3.50
-(unknown model)      $15.00 / $15.00  conservative default</pre>
-      <p style="font-size:0.8rem;color:#888;margin-top:10px">budget_clear deducts estimated output cost. Unused tokens are not charged.</p>
+gemini-1-5-pro        $1.25 /  $3.50</pre>
+      <p style="font-size:0.8rem;color:#888;margin-top:10px">budget_clear deducts estimated output cost. Unused tokens are not charged. Unlisted models default to $15.00/M output tokens. Updated May 2026.</p>
     </section>
 
     <footer>
@@ -372,18 +384,79 @@ gemini-1-5-pro        $1.25 /  $3.50
     </footer>
   </div>
 
+<div class="modal-overlay" id="key-modal" onclick="if(event.target===this)closeKeyModal()">
+  <div class="modal-box">
+    <div class="modal-title">Your API key</div>
+    <div class="modal-warning">⚠ Save this key now — it will not be shown again. There is no account recovery. If you lose it, your credits are permanently lost.</div>
+    <div class="modal-key-row">
+      <div class="modal-key" id="new-key-display"></div>
+      <button class="btn-get-key" id="copy-key-btn" onclick="copyNewKey()">Copy</button>
+    </div>
+    <button class="modal-done-btn" onclick="closeKeyModal()">I've saved my key — start topping up</button>
+  </div>
+</div>
+
 <script>
 (function () {
   var input = document.getElementById('api-key-input');
   var packs = document.querySelectorAll('.pack[data-base]');
+  var qsUrl = document.getElementById('qs-url');
   input.addEventListener('input', function () {
     var key = this.value.trim();
     packs.forEach(function (p) {
       var base = p.getAttribute('data-base');
       p.href = key ? base + '?api_key=' + encodeURIComponent(key) : base;
     });
+    if (qsUrl) {
+      qsUrl.textContent = key
+        ? 'https://gvnr.dev/pay/starter?api_key=' + encodeURIComponent(key)
+        : 'https://gvnr.dev/pay/starter?api_key=bg_YOUR_KEY';
+    }
   });
 })();
+
+async function getApiKey() {
+  var btn = document.getElementById('get-key-btn');
+  btn.textContent = 'Getting...';
+  btn.disabled = true;
+  try {
+    var res = await fetch('/v1/account', { method: 'POST' });
+    var data = await res.json();
+    if (!res.ok) {
+      btn.textContent = 'Get API key';
+      btn.disabled = false;
+      alert(data.error === 'rate_limited' ? 'Rate limited. Try again in an hour.' : 'Error: ' + data.error);
+      return;
+    }
+    document.getElementById('new-key-display').textContent = data.api_key;
+    document.getElementById('key-modal').style.display = 'flex';
+    btn.textContent = 'Get API key';
+    btn.disabled = false;
+  } catch (e) {
+    btn.textContent = 'Get API key';
+    btn.disabled = false;
+    alert('Network error. Try again.');
+  }
+}
+
+function copyNewKey() {
+  var key = document.getElementById('new-key-display').textContent;
+  navigator.clipboard.writeText(key).then(function () {
+    var btn = document.getElementById('copy-key-btn');
+    var orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(function () { btn.textContent = orig; }, 1500);
+  });
+}
+
+function closeKeyModal() {
+  var key = document.getElementById('new-key-display').textContent;
+  document.getElementById('key-modal').style.display = 'none';
+  var input = document.getElementById('api-key-input');
+  input.value = key;
+  input.dispatchEvent(new Event('input'));
+  document.getElementById('pricing').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 </script>
 </body>
 </html>`;
@@ -431,5 +504,32 @@ app.route('/v1/budget', budgetRoutes);
 
 // MCP server — Streamable HTTP transport, stateless, all verbs
 app.all('/mcp', mcpHandler);
+
+app.notFound((c) => {
+  return c.html(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Not Found — Budget Governor</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0a0a0a;color:#e5e5e5;padding:48px 24px;min-height:100vh}
+    .container{max-width:520px;margin:0 auto}
+    h1{font-size:1.4rem;font-weight:600;letter-spacing:-0.02em;margin-bottom:6px}
+    p{color:#888;font-size:0.9rem;margin-bottom:24px;margin-top:6px}
+    a{color:#a78bfa;text-decoration:none;font-size:0.9rem}
+    a:hover{text-decoration:underline}
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>404 — Not Found</h1>
+  <p>This page doesn't exist.</p>
+  <a href="/">← Back to homepage</a>
+</div>
+</body>
+</html>`, 404);
+});
 
 export default app;

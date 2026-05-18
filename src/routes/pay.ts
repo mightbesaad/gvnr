@@ -107,10 +107,29 @@ export default pay;
 
 function errorPage(message: string): string {
   return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><title>Error</title>
-<style>body{font-family:system-ui;background:#0a0a0a;color:#e5e5e5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
-p{color:#f87171;font-size:0.95rem}</style></head>
-<body><p>${message}</p></body></html>`;
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Error — Budget Governor</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0a0a0a;color:#e5e5e5;padding:48px 24px;min-height:100vh}
+    .container{max-width:520px;margin:0 auto}
+    h1{font-size:1.4rem;font-weight:600;letter-spacing:-0.02em;margin-bottom:6px}
+    .msg{color:#f87171;font-size:0.9rem;margin-bottom:24px;margin-top:6px}
+    a{color:#a78bfa;text-decoration:none;font-size:0.9rem}
+    a:hover{text-decoration:underline}
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Error</h1>
+  <p class="msg">${message}</p>
+  <a href="/">← Back to homepage</a>
+</div>
+</body>
+</html>`;
 }
 
 interface PageData {
@@ -233,9 +252,15 @@ function payPage(d: PageData): string {
     <div class="step-label">3 · Confirm payment</div>
 
     ${!d.apiKey ? `
-    <div class="field-label">Your API key</div>
+    <div class="field-label" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">
+      <span>Your API key</span>
+      <span style="font-size:0.72rem;color:#555">No key? <a href="#" onclick="provisionKey(event)" id="provision-link" style="color:#818cf8">Get one →</a></span>
+    </div>
     <div class="key-row">
       <input type="text" class="key-input" id="api-key" placeholder="bg_..." value="">
+    </div>
+    <div id="key-save-warning" style="display:none;background:#1a0808;border:1px solid #3a1414;color:#f87171;font-size:0.8rem;padding:8px 12px;border-radius:6px;margin-top:8px;line-height:1.5">
+      ⚠ Save this key — it cannot be recovered. If you lose it, your credits are permanently lost.
     </div>
     ` : `<input type="hidden" id="api-key" value="${d.apiKey}">`}
 
@@ -342,6 +367,28 @@ async function verifyPayment() {
     document.getElementById('next-steps').style.display = 'block';
   }
 })();
+
+async function provisionKey(e) {
+  e.preventDefault();
+  var link = document.getElementById('provision-link');
+  link.textContent = 'Getting...';
+  try {
+    var res = await fetch('/v1/account', { method: 'POST' });
+    var data = await res.json();
+    if (!res.ok) {
+      link.textContent = data.error === 'rate_limited' ? 'Rate limited (try in 1h)' : 'Error: ' + data.error;
+      return;
+    }
+    var input = document.getElementById('api-key');
+    input.value = data.api_key;
+    input.style.borderColor = '#4f46e5';
+    link.textContent = 'Key ready ✓';
+    link.style.color = '#4ade80';
+    document.getElementById('key-save-warning').style.display = 'block';
+  } catch (err) {
+    link.textContent = 'Network error';
+  }
+}
 
 async function connectAndPay() {
   if (!window.ethereum) {

@@ -7,9 +7,9 @@ import type { MiddlewareHandler } from 'hono';
 const FACILITATOR_URL = 'https://x402.org/facilitator';
 
 export const PACKS = {
-  starter: { amount_usd: 19, description: 'Starter — ~10k clearances/month' },
-  growth:  { amount_usd: 39, description: 'Growth — ~30k clearances/month' },
-  studio:  { amount_usd: 79, description: 'Studio — ~100k clearances/month' },
+  starter: { amount_usd: 19, description: 'Starter — ~10k budget_clear calls/month' },
+  growth:  { amount_usd: 39, description: 'Growth — ~30k budget_clear calls/month' },
+  studio:  { amount_usd: 79, description: 'Studio — ~100k budget_clear calls/month' },
 } as const;
 
 export type PackName = keyof typeof PACKS;
