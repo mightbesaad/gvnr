@@ -1,6 +1,6 @@
 # Budget Governor
 
-Hard spend cap for autonomous AI agents. One MCP call before each LLM request — approved or denied before the call reaches any provider.
+Hard cap on estimated AI agent spend. One MCP call before each LLM request — approved or denied before the call reaches any provider.
 
 No deployment. No proxy. No self-hosting.
 

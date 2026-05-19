@@ -18,4 +18,5 @@ export interface Env {
   PAYTO_ADDRESS: string;     // USDC receiving address (0x...)
   X402_NETWORK: string;      // e.g. "eip155:8453" (Base) or "eip155:84532" (Base Sepolia)
   ADMIN_SECRET: string;      // secret header value for admin endpoints
+  BASE_RPC_FALLBACK_URL?: string; // optional fallback RPC if the primary chain RPC fails
 }

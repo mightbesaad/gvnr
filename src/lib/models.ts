@@ -17,7 +17,9 @@ const MODEL_PRICES: Record<string, number> = {
 // Sorted once at module load — longest prefix wins (e.g. "gpt-4o-mini" before "gpt-4o").
 const MODEL_PRICE_ENTRIES = Object.entries(MODEL_PRICES).sort((a, b) => b[0].length - a[0].length);
 
-const DEFAULT_PRICE_PER_MTOK = 15; // fallback for unknown models
+// Fail-safe direction: unknown model strings debit at the highest known output rate (Opus)
+// so a typo or new model can never silently under-bill the agent's envelope.
+const DEFAULT_PRICE_PER_MTOK = 75;
 
 export function estimateCostUsd(model: string, tokens: number): number {
   const entry = MODEL_PRICE_ENTRIES.find(([prefix]) => model.startsWith(prefix));

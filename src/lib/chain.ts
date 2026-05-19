@@ -38,24 +38,35 @@ interface RpcReceipt {
   }>;
 }
 
+// Returns the receipt, `null` for a definite "not yet on chain" response, or throws on transport failure.
+async function fetchReceipt(rpcUrl: string, txHash: string): Promise<RpcReceipt | null> {
+  const resp = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_getTransactionReceipt', params: [txHash], id: 1 }),
+  });
+  const json = (await resp.json()) as { result: RpcReceipt | null };
+  return json.result;
+}
+
 export async function verifyUsdcTransfer(
   txHash: string,
   payTo: string,
   expectedRawAmount: bigint,
   usdcContract: string,
   rpcUrl: string,
-): Promise<{ ok: boolean; error?: string }> {
+  fallbackRpcUrl?: string,
+): Promise<{ ok: boolean; error?: string; overpaid_raw?: string }> {
   let receipt: RpcReceipt | null;
   try {
-    const resp = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_getTransactionReceipt', params: [txHash], id: 1 }),
-    });
-    const json = (await resp.json()) as { result: RpcReceipt | null };
-    receipt = json.result;
+    receipt = await fetchReceipt(rpcUrl, txHash);
   } catch {
-    return { ok: false, error: 'rpc_error' };
+    if (!fallbackRpcUrl) return { ok: false, error: 'rpc_error' };
+    try {
+      receipt = await fetchReceipt(fallbackRpcUrl, txHash);
+    } catch {
+      return { ok: false, error: 'rpc_error' };
+    }
   }
 
   if (!receipt) return { ok: false, error: 'tx_not_found' };
@@ -70,7 +81,10 @@ export async function verifyUsdcTransfer(
     if (log.topics[2]?.toLowerCase() !== paddedPayTo) continue;
 
     const transferAmount = BigInt(log.data);
-    if (transferAmount === expectedRawAmount) return { ok: true };
+    if (transferAmount >= expectedRawAmount) {
+      const overpay = transferAmount - expectedRawAmount;
+      return { ok: true, overpaid_raw: overpay > 0n ? overpay.toString() : undefined };
+    }
   }
 
   return { ok: false, error: 'transfer_not_found' };

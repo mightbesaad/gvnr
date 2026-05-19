@@ -59,6 +59,7 @@ tos.get('/', (c) => {
       <p>USDC transfers on the Base blockchain are irreversible on-chain. <strong>Credits are non-refundable once purchased.</strong></p>
       <p>If you experience a verifiable service error — for example, a payment that reached our receiver address but was not credited to your account due to a fault on our end — open an issue on <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">GitHub</a> with your transaction hash and API key. We will review and credit your account at our discretion.</p>
       <p>We do not issue refunds for unused credits, incorrectly sized packs, or costs incurred by your agents.</p>
+      <p><strong>Overpayments.</strong> If you send more USDC than the pack price (for example, rounding from an exchange withdrawal, or sending $20 to a $19 pack), your account is credited with the pack's nominal amount only. Excess is logged for manual review and is not auto-refunded; contact support via GitHub Issues with your transaction hash if you need the overpayment reviewed.</p>
     </section>
 
     <section>

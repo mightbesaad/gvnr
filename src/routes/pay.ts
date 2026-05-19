@@ -47,15 +47,37 @@ pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
   if (!cfg) return c.json({ error: 'misconfigured_network' }, 500);
 
   const txKey = `used_tx:${cfg.chainId}:${txHash.toLowerCase()}`;
-  const alreadyUsed = await c.env.BUDGET_KV.get(txKey);
-  if (alreadyUsed) return c.json({ error: 'already_used' }, 409);
-
-  const expectedRaw = packToRawAmount(pack.amount_usd);
-  const verification = await verifyUsdcTransfer(txHash, c.env.PAYTO_ADDRESS, expectedRaw, cfg.usdcContract, cfg.rpcUrl);
-  if (!verification.ok) return c.json({ error: verification.error }, 400);
-
   const accountId = c.get('accountId');
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
+
+  const alreadyUsed = await c.env.BUDGET_KV.get(txKey);
+  if (alreadyUsed) {
+    const balance = await stub.getBalance();
+    return c.json({ balance_usd: balance, pack: packName, already_credited: true });
+  }
+
+  const expectedRaw = packToRawAmount(pack.amount_usd);
+  const verification = await verifyUsdcTransfer(
+    txHash,
+    c.env.PAYTO_ADDRESS,
+    expectedRaw,
+    cfg.usdcContract,
+    cfg.rpcUrl,
+    c.env.BASE_RPC_FALLBACK_URL,
+  );
+  if (!verification.ok) return c.json({ error: verification.error }, 400);
+
+  if (verification.overpaid_raw) {
+    console.log(JSON.stringify({
+      event: 'overpayment',
+      tx_hash: txHash,
+      account_id: accountId,
+      pack: packName,
+      expected_raw: expectedRaw.toString(),
+      overpaid_raw: verification.overpaid_raw,
+    }));
+  }
+
   const credited = await stub.credit(pack.amount_usd);
 
   // Mark tx as used — 30-day TTL prevents replay, doesn't bloat KV forever
@@ -344,7 +366,6 @@ async function verifyPayment() {
       document.getElementById('next-steps').style.display = 'block';
     } else {
       const msgs = {
-        already_used: 'This transaction has already been used.',
         tx_not_found: 'Transaction not found yet. Wait for confirmation and try again.',
         tx_failed: 'Transaction failed on-chain.',
         transfer_not_found: 'No matching USDC transfer found in this transaction.',

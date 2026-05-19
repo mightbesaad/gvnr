@@ -99,7 +99,7 @@ app.get('/.well-known/mcp.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     name: 'Budget Governor',
-    description: 'Hard spend cap for autonomous AI agents. Check clearance and track spend before each LLM call.',
+    description: 'Hard cap on estimated AI agent spend. Check clearance and track spend before each LLM call.',
     version: '1.0.0',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
@@ -119,7 +119,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Budget Governor', version: '1.0.0', description: 'Hard spend cap for autonomous AI agents.' },
+    info: { title: 'Budget Governor', version: '1.0.0', description: 'Hard cap on estimated AI agent spend.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
@@ -214,9 +214,9 @@ app.get('/', (c) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Budget Governor — AI agent spend caps</title>
-  <meta name="description" content="Hard spend cap for autonomous AI agents. One MCP call before each LLM request stops runaway billing before it starts.">
+  <meta name="description" content="Hard cap on estimated AI agent spend. One MCP call before each LLM request stops runaway estimates before they hit your bill.">
   <meta property="og:title" content="Budget Governor">
-  <meta property="og:description" content="Hard spend cap for autonomous AI agents. One MCP call before each LLM request — stops runaway billing before it starts.">
+  <meta property="og:description" content="Hard cap on estimated AI agent spend. One MCP call before each LLM request — stops runaway estimates before they hit your bill.">
   <meta property="og:url" content="https://gvnr.dev">
   <meta property="og:type" content="website">
   <meta name="robots" content="index, follow">
@@ -276,8 +276,8 @@ app.get('/', (c) => {
 <body>
   <div class="container">
     <h1>Budget Governor</h1>
-    <p class="tagline">Hard spend cap for autonomous AI agents — one call, before the LLM request.</p>
-    <p class="value-prop">Stop runaway billing before it starts. Set a $5/day cap per agent, get approved or denied in one MCP call.</p>
+    <p class="tagline">Hard cap on estimated AI agent spend — one call, before the LLM request.</p>
+    <p class="value-prop">Stop runaway estimates before they hit your bill. Set a $5/day cap per agent, get approved or denied in one MCP call.</p>
 
     <div class="header-row">
       <div class="status">
@@ -366,7 +366,7 @@ claude-haiku-4-5      $0.80 /  $4.00
 gpt-4o                $2.50 / $10.00
 gpt-4o-mini           $0.15 /  $0.60
 gemini-1-5-pro        $1.25 /  $3.50</pre>
-      <p style="font-size:0.8rem;color:#888;margin-top:10px">budget_clear deducts estimated output cost. Unused tokens are not charged. Unlisted models default to $15.00/M output tokens. Updated May 2026.</p>
+      <p style="font-size:0.8rem;color:#888;margin-top:10px">budget_clear deducts estimated output cost. Unused tokens are not charged. Unlisted models default to $75.00/M output tokens (Opus rate — fail-safe). Caps enforce on pre-call estimates, not actual provider bills. Updated May 2026.</p>
     </section>
 
     <footer>

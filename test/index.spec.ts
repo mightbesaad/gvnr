@@ -407,7 +407,7 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     expect((await res.json<{ error: string }>()).error).toBe('invalid_pack');
   });
 
-  it('returns 409 for already-used tx hash', async () => {
+  it('returns 200 with already_credited for already-used tx hash (idempotent)', async () => {
     const { apiKey } = await provisionAccount();
     await env.BUDGET_KV.put(`used_tx:84532:${VALID_TX}`, '1');
     const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
@@ -415,8 +415,11 @@ describe('POST /v1/account/topup-verify/:pack', () => {
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ tx_hash: VALID_TX }),
     });
-    expect(res.status).toBe(409);
-    expect((await res.json<{ error: string }>()).error).toBe('already_used');
+    expect(res.status).toBe(200);
+    const body = await res.json<{ balance_usd: number; pack: string; already_credited: boolean }>();
+    expect(body.already_credited).toBe(true);
+    expect(body.pack).toBe('starter');
+    expect(typeof body.balance_usd).toBe('number');
   });
 
   it('returns 400 when tx not found on chain', async () => {
@@ -457,7 +460,7 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     expect((await balRes.json<{ balance_usd: number }>()).balance_usd).toBe(19);
   });
 
-  it('rejects second submit of same tx hash (replay protection)', async () => {
+  it('second submit of same tx hash returns existing balance, does not double-credit', async () => {
     const TX = '0x' + 'd'.repeat(64);
     stubRpc(makeReceipt(PAYTO, 19_000_000n));
     const { apiKey } = await provisionAccount();
@@ -472,8 +475,10 @@ describe('POST /v1/account/topup-verify/:pack', () => {
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ tx_hash: TX }),
     });
-    expect(second.status).toBe(409);
-    expect((await second.json<{ error: string }>()).error).toBe('already_used');
+    expect(second.status).toBe(200);
+    const body = await second.json<{ balance_usd: number; already_credited: boolean }>();
+    expect(body.already_credited).toBe(true);
+    expect(body.balance_usd).toBe(19); // unchanged — no double credit
   });
 
   it('rejects transfer to wrong address', async () => {
@@ -502,6 +507,78 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     });
     expect(res.status).toBe(400);
     expect((await res.json<{ error: string }>()).error).toBe('transfer_not_found');
+  });
+
+  it('rejects underpayment by 1 wei (proves >= not >)', async () => {
+    const TX = '0x' + '1'.repeat(64);
+    stubRpc(makeReceipt(PAYTO, 19_000_000n - 1n));
+    const { apiKey } = await provisionAccount();
+
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('transfer_not_found');
+  });
+
+  it('credits pack amount and logs overpayment when transfer exceeds expected', async () => {
+    const TX = '0x' + '2'.repeat(64);
+    stubRpc(makeReceipt(PAYTO, 20_000_000n)); // $20 sent to $19 pack — $1 overpay
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { apiKey } = await provisionAccount();
+
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ balance_usd: number; credited: number }>();
+    expect(body.credited).toBe(19);
+    expect(body.balance_usd).toBe(19);
+
+    const logged = logSpy.mock.calls.map(c => String(c[0])).find(s => s.includes('overpayment'));
+    expect(logged).toBeTruthy();
+    const parsed = JSON.parse(logged!);
+    expect(parsed.event).toBe('overpayment');
+    expect(parsed.pack).toBe('starter');
+    expect(parsed.overpaid_raw).toBe('1000000');
+    logSpy.mockRestore();
+  });
+
+  it('falls back to BASE_RPC_FALLBACK_URL when primary RPC throws', async () => {
+    const TX = '0x' + '3'.repeat(64);
+    const calls: string[] = [];
+    const real = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
+      if (url.includes('.base.org')) {
+        calls.push('primary');
+        throw new Error('primary unreachable');
+      }
+      if (url.includes('publicnode.com')) {
+        calls.push('fallback');
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0',
+          result: makeReceipt(PAYTO, 19_000_000n),
+          id: 1,
+        }), { headers: { 'Content-Type': 'application/json' } });
+      }
+      return real(input, init);
+    });
+
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX }),
+    });
+
+    expect(res.status).toBe(200);
+    expect((await res.json<{ balance_usd: number }>()).balance_usd).toBe(19);
+    expect(calls).toEqual(['primary', 'fallback']);
   });
 });
 
@@ -614,6 +691,37 @@ describe('cross-path: MCP write → REST read', () => {
 });
 
 // ── runClearance edge cases ───────────────────────────────────────────────────
+
+describe('estimateCostUsd unknown-model fallback', () => {
+  it('debits unknown models at the highest known rate (Opus output) — fail-safe', async () => {
+    const { apiKey } = await provisionAccount();
+    // $0.075 = 1000 tokens × $75/M (Opus rate, the new default)
+    await seedCredits(apiKey, 0.075);
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'agent', limit_usd: 1 }),
+    });
+
+    // Approves at exactly the seeded balance
+    const ok = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'agent', model: 'totally-unknown-model-xyz', estimated_tokens: 1000 }),
+    });
+    expect((await ok.json<{ approved: boolean }>()).approved).toBe(true);
+
+    // Now denied — balance drained at the higher (Opus) rate, not the old $15 default
+    const denied = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'agent', model: 'totally-unknown-model-xyz', estimated_tokens: 1 }),
+    });
+    const body = await denied.json<{ approved: boolean; reason: string }>();
+    expect(body.approved).toBe(false);
+    expect(body.reason).toBe('no_credits');
+  });
+});
 
 describe('runClearance edge cases', () => {
   // haiku-4-5 = $4/M tokens → 1000 tokens = $0.004
