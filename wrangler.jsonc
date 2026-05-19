@@ -6,6 +6,7 @@
 	"observability": {
 		"enabled": true,
 	},
+	"tail_consumers": [{ "service": "budget-governor-tail" }],
 	"durable_objects": {
 		"bindings": [{ "name": "ACCOUNT", "class_name": "AccountState" }],
 	},

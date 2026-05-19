@@ -1,0 +1,23 @@
+name: Smoke test
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Target URL (default: https://gvnr.dev)'
+        required: false
+        default: 'https://gvnr.dev'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run smoke test
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          SMOKE_ADMIN_SECRET: ${{ secrets.SMOKE_ADMIN_SECRET }}
+        run: node scripts/smoke-test.mjs
