@@ -66,6 +66,10 @@ pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
 
 // GET /pay/:pack — human-facing payment page
 pay.get('/pay/:pack', async (c) => {
+  c.header('X-Frame-Options', 'DENY');
+  c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
+  c.header('X-Content-Type-Options', 'nosniff');
+
   const packName = c.req.param('pack') as PackName;
   const pack = PACKS[packName];
   if (!pack) {
@@ -83,10 +87,6 @@ pay.get('/pay/:pack', async (c) => {
   }
   const apiKey = rawApiKey;
   const rawAmount = packToRawAmount(pack.amount_usd);
-
-  c.header('X-Frame-Options', 'DENY');
-  c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
-  c.header('X-Content-Type-Options', 'nosniff');
   return c.html(payPage({
     packName,
     amountUsd: pack.amount_usd,
