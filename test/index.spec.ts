@@ -549,4 +549,164 @@ describe('MCP tools → Durable Object routing', () => {
     const bal = await mcpToolCall(apiKey, 'get_balance', {});
     expect(bal.balance_usd).toBe(7);
   });
+
+  it('returns 401 for missing api_key', async () => {
+    const res = await SELF.fetch('http://localhost/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 for invalid api_key', async () => {
+    const res = await SELF.fetch('http://localhost/mcp?api_key=bg_invalid', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+    });
+    expect(res.status).toBe(401);
+  });
+});
+
+// ── Cross-path: REST ↔ MCP read/write consistency ────────────────────────────
+
+describe('cross-path: REST write → MCP read', () => {
+  it('envelope set via REST is visible to MCP budget_clear', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10);
+
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'rest-agent', limit_usd: 5 }),
+    });
+
+    const clearance = await mcpToolCall(apiKey, 'budget_clear', {
+      agent_id: 'rest-agent',
+      model: 'claude-haiku-4-5-20251001',
+      estimated_tokens: 100,
+    });
+
+    expect(clearance.approved).toBe(true);
+  });
+});
+
+describe('cross-path: MCP write → REST read', () => {
+  it('envelope set via MCP is returned by REST GET', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10);
+
+    await mcpToolCall(apiKey, 'set_envelope', {
+      agent_id: 'mcp-agent',
+      limit_usd: 3,
+      window: 'daily',
+    });
+
+    const res = await SELF.fetch('http://localhost/v1/budget/envelope/mcp-agent', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ limit_usd: number; window: string }>();
+    expect(body.limit_usd).toBe(3);
+    expect(body.window).toBe('daily');
+  });
+});
+
+// ── runClearance edge cases ───────────────────────────────────────────────────
+
+describe('runClearance edge cases', () => {
+  // haiku-4-5 = $4/M tokens → 1000 tokens = $0.004
+  const MODEL = 'claude-haiku-4-5-20251001';
+  const COST = 0.004; // cost of 1000 tokens at haiku price
+
+  it('approves when balance equals estimated cost exactly', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, COST);
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'agent', limit_usd: COST }),
+    });
+
+    const res = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'agent', model: MODEL, estimated_tokens: 1000 }),
+    });
+    expect((await res.json<{ approved: boolean }>()).approved).toBe(true);
+  });
+
+  it('depletes balance across sequential clearances, then denies', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, COST * 3); // exactly 3 clearances
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'agent', limit_usd: COST * 10 }),
+    });
+
+    const args = { agent_id: 'agent', model: MODEL, estimated_tokens: 1000 };
+    const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+
+    for (let i = 0; i < 3; i++) {
+      const r = await SELF.fetch('http://localhost/v1/budget/clear', {
+        method: 'POST', headers,
+        body: JSON.stringify(args),
+      });
+      expect((await r.json<{ approved: boolean }>()).approved).toBe(true);
+    }
+
+    const denied = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST', headers,
+      body: JSON.stringify(args),
+    });
+    expect((await denied.json<{ approved: boolean; reason: string }>()).reason).toBe('no_credits');
+  });
+
+  it('session window never resets spent amount', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10);
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'agent', limit_usd: COST, window: 'session' }),
+    });
+
+    // spend the full envelope
+    await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'agent', model: MODEL, estimated_tokens: 1000 }),
+    });
+
+    // session window — no reset, should deny
+    const res = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'agent', model: MODEL, estimated_tokens: 1000 }),
+    });
+    expect((await res.json<{ approved: boolean; reason: string }>()).reason).toBe('envelope_exceeded');
+  });
+
+  it('daily window resets spent amount when reset_at is in the past', async () => {
+    const { apiKey, accountId } = await provisionAccount();
+    await seedCredits(apiKey, 10);
+
+    // plant an already-exhausted envelope with a past reset_at via direct DO access
+    const stub = env.ACCOUNT.get(env.ACCOUNT.idFromName(accountId));
+    await stub.setEnvelope('agent', {
+      limit_usd: COST,
+      spent_usd: COST,       // fully spent
+      window: 'daily',
+      reset_at: Date.now() - 1000, // reset was 1 second ago
+    });
+
+    const res = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'agent', model: MODEL, estimated_tokens: 1000 }),
+    });
+    expect((await res.json<{ approved: boolean }>()).approved).toBe(true);
+  });
 });
