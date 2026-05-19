@@ -1,12 +1,13 @@
 interface TailEnv {
-  ALERT_WEBHOOK: string;
+  TELEGRAM_BOT_TOKEN: string;
+  TELEGRAM_CHAT_ID: string;
 }
 
 const CRASH_OUTCOMES = new Set(['exception', 'exceeded-cpu', 'exceeded-memory', 'crashed']);
 
 export default {
   async tail(events: TraceItem[], env: TailEnv): Promise<void> {
-    if (!env.ALERT_WEBHOOK) return;
+    if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
 
     for (const event of events) {
       const isCrash = CRASH_OUTCOMES.has(event.outcome);
@@ -25,16 +26,16 @@ export default {
         .slice(0, 800);
 
       const summary = isCrash
-        ? `**crash** · outcome: \`${event.outcome}\``
-        : `**HTTP ${status}**`;
+        ? `crash · outcome: ${event.outcome}`
+        : `HTTP ${status}`;
 
-      const lines = [`🚨 budget-governor ${summary}`, `URL: \`${url}\``];
-      if (excs) lines.push(`\`\`\`\n${excs}\n\`\`\``);
+      const lines = [`🚨 budget-governor ${summary}`, `URL: ${url}`];
+      if (excs) lines.push(excs);
 
-      await fetch(env.ALERT_WEBHOOK, {
+      await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: lines.join('\n') }),
+        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: lines.join('\n') }),
       });
     }
   },
