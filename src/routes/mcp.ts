@@ -3,7 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { z } from 'zod';
 import type { Context } from 'hono';
 import type { Env } from '../lib/types';
-import { getAccount, getBalance, getEnvelope, setEnvelope } from '../lib/kv';
+import { getAccount } from '../lib/kv';
 import { nextDailyReset } from '../lib/models';
 
 export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Response> {
@@ -20,8 +20,8 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
     return c.json({ error: 'invalid_api_key' }, 401);
   }
 
-  const kv = c.env.BUDGET_KV;
   const accountId = account.account_id;
+  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
 
   const server = new McpServer({ name: 'budget-governor', version: '1.0.0' });
 
@@ -36,7 +36,6 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
       },
     },
     async ({ agent_id, model, estimated_tokens }) => {
-      const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
       const result = await stub.runClearance(agent_id, model, estimated_tokens);
       return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
     },
@@ -53,8 +52,8 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
       },
     },
     async ({ agent_id, limit_usd, window }) => {
-      const existing = await getEnvelope(kv, accountId, agent_id);
-      await setEnvelope(kv, accountId, agent_id, {
+      const existing = await stub.getEnvelope(agent_id);
+      await stub.setEnvelope(agent_id, {
         limit_usd,
         spent_usd: existing?.spent_usd ?? 0,
         window,
@@ -71,8 +70,8 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
       inputSchema: {},
     },
     async () => {
-      const balance = await getBalance(kv, accountId);
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ balance_usd: balance?.balance_usd ?? 0 }) }] };
+      const balance = await stub.getBalance();
+      return { content: [{ type: 'text' as const, text: JSON.stringify({ balance_usd: balance }) }] };
     },
   );
 

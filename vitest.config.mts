@@ -8,7 +8,7 @@ export default defineWorkersConfig({
 				miniflare: {
 					// x402 facilitator only supports testnet in CI/unit tests;
 					// production wrangler.jsonc uses mainnet (eip155:8453).
-					bindings: { X402_NETWORK: "eip155:84532" },
+					bindings: { X402_NETWORK: "eip155:84532", ADMIN_SECRET: "dev-secret-local" },
 					// Miniflare only supports period: 10 | 60; production uses 3600.
 					// Limit set high so tests don't exhaust the shared "unknown" IP key.
 					ratelimits: {

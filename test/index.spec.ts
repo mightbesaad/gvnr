@@ -504,3 +504,49 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     expect((await res.json<{ error: string }>()).error).toBe('transfer_not_found');
   });
 });
+
+// ── MCP tool helpers ──────────────────────────────────────────────────────────
+
+async function mcpCall(apiKey: string, method: string, params: object) {
+  const res = await SELF.fetch(`http://localhost/mcp?api_key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  return res.json<{ result?: { content: Array<{ text: string }> }; error?: object }>();
+}
+
+async function mcpToolCall(apiKey: string, name: string, args: object) {
+  const body = await mcpCall(apiKey, 'tools/call', { name, arguments: args });
+  if (!body.result) throw new Error(`MCP error: ${JSON.stringify(body.error)}`);
+  return JSON.parse(body.result.content[0].text);
+}
+
+describe('MCP tools → Durable Object routing', () => {
+  it('set_envelope via MCP then budget_clear via MCP returns approved', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10);
+
+    await mcpToolCall(apiKey, 'set_envelope', {
+      agent_id: 'test-agent',
+      limit_usd: 5,
+      window: 'daily',
+    });
+
+    const clearance = await mcpToolCall(apiKey, 'budget_clear', {
+      agent_id: 'test-agent',
+      model: 'claude-haiku-4-5-20251001',
+      estimated_tokens: 100,
+    });
+
+    expect(clearance.approved).toBe(true);
+  });
+
+  it('get_balance via MCP returns DO balance after credit', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 7);
+
+    const bal = await mcpToolCall(apiKey, 'get_balance', {});
+    expect(bal.balance_usd).toBe(7);
+  });
+});
