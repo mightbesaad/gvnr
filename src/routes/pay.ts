@@ -69,7 +69,7 @@ pay.get('/pay/:pack', async (c) => {
   const packName = c.req.param('pack') as PackName;
   const pack = PACKS[packName];
   if (!pack) {
-    return c.html(errorPage(`Unknown pack "${packName}". Valid packs: ${Object.keys(PACKS).join(', ')}.`), 404);
+    return c.html(errorPage(`Unknown pack. Valid packs: ${Object.keys(PACKS).join(', ')}.`), 404);
   }
 
   const network = c.env.X402_NETWORK as NetworkKey;
