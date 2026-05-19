@@ -2,11 +2,6 @@ export interface AccountRecord {
   account_id: string;
 }
 
-export interface BalanceRecord {
-  balance_usd: number;
-  updated_at: number;
-}
-
 export interface EnvelopeRecord {
   limit_usd: number;
   spent_usd: number;
