@@ -63,7 +63,7 @@ describe('GET /', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     const text = await res.text();
-    expect(text).toContain('Budget Governor');
+    expect(text).toContain('Gvnr');
     expect(text).toContain('budget_clear');
   });
 });
@@ -456,6 +456,210 @@ describe('POST /v1/budget/reconcile', () => {
     });
     expect(res.status).toBe(200);
     expect((await res.json<{ drift_usd: number }>()).drift_usd).toBeCloseTo(0.015, 6);
+  });
+});
+
+// ── Rate Limit Coordinator ────────────────────────────────────────────────────
+
+describe('Rate Limit Coordinator', () => {
+  const PROVIDER = 'anthropic';
+  const MODEL = 'claude-sonnet-4-6';
+
+  async function putRateEnvelope(apiKey: string, opts: {
+    agent_id?: string;
+    provider?: string;
+    model?: string;
+    requests_per_minute?: number;
+  } = {}) {
+    return SELF.fetch('http://localhost/v1/rate/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent_id: opts.agent_id ?? 'agent',
+        provider: opts.provider ?? PROVIDER,
+        model: opts.model ?? MODEL,
+        requests_per_minute: opts.requests_per_minute ?? 10,
+      }),
+    });
+  }
+
+  async function rateCheck(apiKey: string, opts: { agent_id?: string; provider?: string; model?: string } = {}) {
+    return SELF.fetch('http://localhost/v1/rate/check', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent_id: opts.agent_id ?? 'agent',
+        provider: opts.provider ?? PROVIDER,
+        model: opts.model ?? MODEL,
+      }),
+    });
+  }
+
+  it('PUT /v1/rate/envelope creates an envelope and GET returns it', async () => {
+    const { apiKey } = await provisionAccount();
+    const put = await putRateEnvelope(apiKey, { requests_per_minute: 15 });
+    expect(put.status).toBe(200);
+    const putBody = await put.json<{ success: boolean; agent_id: string; provider: string; model: string; requests_per_minute: number }>();
+    expect(putBody.success).toBe(true);
+    expect(putBody.requests_per_minute).toBe(15);
+
+    const get = await SELF.fetch(`http://localhost/v1/rate/envelope/agent/${PROVIDER}/${MODEL}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(get.status).toBe(200);
+    const getBody = await get.json<{ requests_per_minute: number; requests_in_window: number }>();
+    expect(getBody.requests_per_minute).toBe(15);
+    expect(getBody.requests_in_window).toBe(0);
+  });
+
+  it('rate_check with no envelope → no_rate_envelope', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await rateCheck(apiKey);
+    expect(res.status).toBe(200);
+    const body = await res.json<{ allowed: boolean; reason: string }>();
+    expect(body.allowed).toBe(false);
+    expect(body.reason).toBe('no_rate_envelope');
+  });
+
+  it('rate_check within limit → allowed, remaining decrements', async () => {
+    const { apiKey } = await provisionAccount();
+    await putRateEnvelope(apiKey, { requests_per_minute: 5 });
+    const res = await rateCheck(apiKey);
+    expect(res.status).toBe(200);
+    const body = await res.json<{ allowed: boolean; requests_remaining_this_minute: number }>();
+    expect(body.allowed).toBe(true);
+    expect(body.requests_remaining_this_minute).toBe(4);
+  });
+
+  it('rate_check at limit → denied with retry_after_ms', async () => {
+    const { apiKey } = await provisionAccount();
+    await putRateEnvelope(apiKey, { requests_per_minute: 3 });
+
+    // First 3 allowed
+    for (let i = 0; i < 3; i++) {
+      const r = await rateCheck(apiKey);
+      expect((await r.json<{ allowed: boolean }>()).allowed).toBe(true);
+    }
+
+    // 4th denied
+    const denied = await rateCheck(apiKey);
+    expect(denied.status).toBe(200);
+    const body = await denied.json<{ allowed: boolean; reason: string; retry_after_ms: number }>();
+    expect(body.allowed).toBe(false);
+    expect(body.reason).toBe('rate_exceeded');
+    expect(body.retry_after_ms).toBeGreaterThan(0);
+    expect(body.retry_after_ms).toBeLessThanOrEqual(60_000);
+  });
+
+  it('rate_check after window expires → allowed again, fresh counter', async () => {
+    const { apiKey, accountId } = await provisionAccount();
+    // Plant a stale, exhausted envelope (window started 61s ago, fully used)
+    const stub = env.ACCOUNT.get(env.ACCOUNT.idFromName(accountId));
+    await stub.setRateEnvelope('agent', PROVIDER, MODEL, 3, {
+      window_start: Date.now() - 61_000,
+      requests_in_window: 3,
+    });
+
+    const res = await rateCheck(apiKey);
+    expect(res.status).toBe(200);
+    const body = await res.json<{ allowed: boolean; requests_remaining_this_minute: number }>();
+    expect(body.allowed).toBe(true);
+    // Window reset, this is the first call in the new window
+    expect(body.requests_remaining_this_minute).toBe(2);
+  });
+
+  it('PUT updates existing envelope and resets window', async () => {
+    const { apiKey } = await provisionAccount();
+    await putRateEnvelope(apiKey, { requests_per_minute: 2 });
+
+    // Exhaust the original envelope
+    await rateCheck(apiKey);
+    await rateCheck(apiKey);
+    const denied = await rateCheck(apiKey);
+    expect((await denied.json<{ allowed: boolean }>()).allowed).toBe(false);
+
+    // Update RPM — should reset window + counter
+    await putRateEnvelope(apiKey, { requests_per_minute: 10 });
+
+    // Now allowed again with fresh counter
+    const fresh = await rateCheck(apiKey);
+    const body = await fresh.json<{ allowed: boolean; requests_remaining_this_minute: number }>();
+    expect(body.allowed).toBe(true);
+    expect(body.requests_remaining_this_minute).toBe(9);
+  });
+
+  it('DELETE removes envelope', async () => {
+    const { apiKey } = await provisionAccount();
+    await putRateEnvelope(apiKey, { requests_per_minute: 5 });
+
+    const del = await SELF.fetch(`http://localhost/v1/rate/envelope/agent/${PROVIDER}/${MODEL}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(del.status).toBe(200);
+
+    // Subsequent rate_check should return no_rate_envelope
+    const after = await rateCheck(apiKey);
+    expect((await after.json<{ reason: string }>()).reason).toBe('no_rate_envelope');
+
+    // Second DELETE returns 404
+    const del2 = await SELF.fetch(`http://localhost/v1/rate/envelope/agent/${PROVIDER}/${MODEL}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(del2.status).toBe(404);
+  });
+
+  it('MCP cross-path: set_rate_envelope via MCP, rate_check via REST', async () => {
+    const { apiKey } = await provisionAccount();
+
+    await mcpToolCall(apiKey, 'set_rate_envelope', {
+      agent_id: 'mcp-agent',
+      provider: PROVIDER,
+      model: MODEL,
+      requests_per_minute: 7,
+    });
+
+    const res = await rateCheck(apiKey, { agent_id: 'mcp-agent' });
+    const body = await res.json<{ allowed: boolean; requests_remaining_this_minute: number }>();
+    expect(body.allowed).toBe(true);
+    expect(body.requests_remaining_this_minute).toBe(6);
+  });
+
+  it('granularity: separate (provider, model) envelopes track independently', async () => {
+    const { apiKey } = await provisionAccount();
+    await putRateEnvelope(apiKey, { provider: 'anthropic', model: 'claude-sonnet-4-6', requests_per_minute: 2 });
+    await putRateEnvelope(apiKey, { provider: 'openai', model: 'gpt-4o', requests_per_minute: 5 });
+
+    // Exhaust anthropic/sonnet
+    await rateCheck(apiKey, { provider: 'anthropic', model: 'claude-sonnet-4-6' });
+    await rateCheck(apiKey, { provider: 'anthropic', model: 'claude-sonnet-4-6' });
+    const sonnetDenied = await rateCheck(apiKey, { provider: 'anthropic', model: 'claude-sonnet-4-6' });
+    expect((await sonnetDenied.json<{ allowed: boolean }>()).allowed).toBe(false);
+
+    // openai/gpt-4o still has room
+    const gptOk = await rateCheck(apiKey, { provider: 'openai', model: 'gpt-4o' });
+    const gptBody = await gptOk.json<{ allowed: boolean; requests_remaining_this_minute: number }>();
+    expect(gptBody.allowed).toBe(true);
+    expect(gptBody.requests_remaining_this_minute).toBe(4);
+  });
+
+  it('PUT rejects invalid params (zero RPM, missing fields)', async () => {
+    const { apiKey } = await provisionAccount();
+
+    const zero = await SELF.fetch('http://localhost/v1/rate/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'a', provider: 'p', model: 'm', requests_per_minute: 0 }),
+    });
+    expect(zero.status).toBe(400);
+
+    const missing = await SELF.fetch('http://localhost/v1/rate/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'a', provider: 'p' }),
+    });
+    expect(missing.status).toBe(400);
   });
 });
 

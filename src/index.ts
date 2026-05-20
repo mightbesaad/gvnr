@@ -5,6 +5,7 @@ import { mcpHandler } from './routes/mcp';
 import accountRoutes from './routes/account';
 import envelopeRoutes from './routes/envelope';
 import budgetRoutes from './routes/budget';
+import rateRoutes from './routes/rate';
 import payRoutes from './routes/pay';
 import tosRoutes from './routes/tos';
 import { getAccount } from './lib/kv';
@@ -86,6 +87,20 @@ app.get('/.well-known/agent-skills/index.json', (c) => {
         url: 'https://gvnr.dev/mcp',
         sha256: '0fabe12e7ca5a969b3726e6fa1943e911e91b85a7580fc6bd1ec30720ef5d62e',
       },
+      {
+        name: 'set_rate_envelope',
+        type: 'mcp',
+        description: 'Create or update a rate-limit envelope for an (agent, provider, model) triple. Each envelope tracks requests per fixed 60-second window.',
+        url: 'https://gvnr.dev/mcp',
+        sha256: '4afa0b3437c801e4aa6f0c96882525be73bf7ad3cbdeb11151dbc8553c8d6585',
+      },
+      {
+        name: 'rate_check',
+        type: 'mcp',
+        description: 'Check whether an agent is allowed to make a call against the rate envelope for the given (provider, model). Increments the counter on allow.',
+        url: 'https://gvnr.dev/mcp',
+        sha256: 'f9a2bd5e4d21c3e278efee3a439df65be1d08854ee2d90ddcb15092ecf67fc83',
+      },
     ],
   });
 });
@@ -106,8 +121,8 @@ app.get('/.well-known/mcp.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     name: 'Budget Governor',
-    description: 'Pre-call cap + post-call reconciliation for AI agent spend. Check clearance before each LLM call, then reconcile against actual usage.',
-    version: '1.1.0',
+    description: 'Spend caps, rate-limit coordination, and post-call reconciliation for AI agents — one MCP endpoint, one credit pool.',
+    version: '1.2.0',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
     authentication: {
@@ -119,6 +134,8 @@ app.get('/.well-known/mcp.json', (c) => {
       { name: 'set_envelope', description: 'Create or update a spend envelope for an agent' },
       { name: 'get_balance', description: 'Get current account credit balance in USD' },
       { name: 'reconcile', description: 'Reconcile a prior budget_clear with actual usage; applies the drift to envelope and balance' },
+      { name: 'set_rate_envelope', description: 'Create or update a rate-limit envelope per (agent, provider, model)' },
+      { name: 'rate_check', description: 'Check whether an agent is allowed to make a call against the rate envelope; increments the counter on allow' },
     ],
   });
 });
@@ -127,7 +144,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Budget Governor', version: '1.1.0', description: 'Pre-call cap + post-call reconciliation for AI agent spend.' },
+    info: { title: 'Budget Governor', version: '1.2.0', description: 'Spend caps, rate-limit coordination, and post-call reconciliation for AI agents.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
@@ -171,6 +188,44 @@ app.get('/openapi.json', (c) => {
           security: [{ bearerAuth: [] }],
           requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, actual_input_tokens: { type: 'integer', minimum: 0 }, actual_output_tokens: { type: 'integer', minimum: 0 } }, required: ['agent_id', 'actual_input_tokens', 'actual_output_tokens'] } } } },
           responses: { '200': { description: 'Returns drift_usd, remaining_usd, balance_usd, optional warning' } },
+        },
+      },
+      '/v1/rate/envelope': {
+        put: {
+          summary: 'Create or update a rate-limit envelope per (agent, provider, model)',
+          security: [{ bearerAuth: [] }],
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' }, requests_per_minute: { type: 'integer', minimum: 1 } }, required: ['agent_id', 'provider', 'model', 'requests_per_minute'] } } } },
+          responses: { '200': { description: 'Envelope created or updated' } },
+        },
+      },
+      '/v1/rate/envelope/{agent_id}/{provider}/{model}': {
+        get: {
+          summary: 'Read current rate envelope state',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { name: 'agent_id', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'provider', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'model', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: { '200': { description: 'Returns rate envelope record' } },
+        },
+        delete: {
+          summary: 'Delete a rate envelope',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { name: 'agent_id', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'provider', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'model', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: { '200': { description: 'Envelope deleted' } },
+        },
+      },
+      '/v1/rate/check': {
+        post: {
+          summary: 'Runtime rate check — returns allowed=true with remaining count, or allowed=false with retry_after_ms',
+          security: [{ bearerAuth: [] }],
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' } }, required: ['agent_id', 'provider', 'model'] } } } },
+          responses: { '200': { description: 'Returns allowed (bool), reason or requests_remaining_this_minute, optional retry_after_ms' } },
         },
       },
       '/v1/budget/envelope': {
@@ -229,10 +284,10 @@ app.get('/', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Budget Governor — AI agent spend caps</title>
-  <meta name="description" content="Pre-call cap + post-call reconcile for AI agent spend. Stops estimate drift before your provider bill catches up.">
-  <meta property="og:title" content="Budget Governor">
-  <meta property="og:description" content="Pre-call cap + post-call reconcile for AI agent spend. Stops estimate drift before your provider bill catches up.">
+  <title>Gvnr — pre-call governance for AI agents</title>
+  <meta name="description" content="Pre-call governance for AI agents — spend caps, rate limits, post-call reconciliation. One MCP endpoint, one credit pool.">
+  <meta property="og:title" content="Gvnr">
+  <meta property="og:description" content="Pre-call governance for AI agents — spend caps, rate limits, post-call reconciliation. One MCP endpoint, one credit pool.">
   <meta property="og:url" content="https://gvnr.dev">
   <meta property="og:type" content="website">
   <meta name="robots" content="index, follow">
@@ -291,35 +346,35 @@ app.get('/', (c) => {
 </head>
 <body>
   <div class="container">
-    <h1>Budget Governor</h1>
-    <p class="tagline">Pre-call cap + post-call reconcile for AI agent spend.</p>
-    <p class="value-prop">Stops estimate drift before your provider bill catches up. Set a $5/day cap per agent, get approved or denied in one call, then reconcile against actual usage.</p>
+    <h1>Gvnr</h1>
+    <p class="tagline">Pre-call governance for AI agents — spend caps, rate limits, reconciliation.</p>
+    <p class="value-prop">One MCP endpoint, one credit pool. Compose <code style="font-family:monospace;color:#a78bfa">budget_clear → rate_check → call LLM → reconcile</code> before every provider request — no infrastructure to deploy.</p>
 
     <div class="header-row">
       <div class="status">
         <div class="dot"></div>
         <div class="status-text"><strong>Live</strong> &nbsp;·&nbsp; <span class="network-badge">${network}</span></div>
       </div>
-      <a class="cta-btn" href="#pricing">Top up credits →</a>
+      <a class="cta-btn" href="#credit-packs">Top up credits →</a>
     </div>
 
-    <section id="pricing">
+    <section id="credit-packs">
       <h2>Credit packs</h2>
       <div class="packs">
         <a class="pack" href="/pay/starter" data-base="/pay/starter">
           <div class="pack-name">starter</div>
           <div class="pack-price">$19</div>
-          <div class="pack-detail">~10k budget_clear calls / month</div>
+          <div class="pack-detail">~10k tool calls / month</div>
         </a>
         <a class="pack" href="/pay/growth" data-base="/pay/growth">
           <div class="pack-name">growth</div>
           <div class="pack-price">$39</div>
-          <div class="pack-detail">~30k budget_clear calls / month</div>
+          <div class="pack-detail">~30k tool calls / month</div>
         </a>
         <a class="pack" href="/pay/studio" data-base="/pay/studio">
           <div class="pack-name">studio</div>
           <div class="pack-price">$79</div>
-          <div class="pack-detail">~100k budget_clear calls / month</div>
+          <div class="pack-detail">~100k tool calls / month</div>
         </a>
       </div>
       <div class="key-row">
@@ -329,8 +384,11 @@ app.get('/', (c) => {
       <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay with USDC on Base mainnet. Credits added immediately after on-chain verification.</p>
     </section>
 
-    <section>
+    <section id="tools">
       <h2>MCP Tools</h2>
+      <p style="font-size:0.82rem;color:#888;margin-bottom:14px">Jump to: <a href="#spend" style="color:#a78bfa">#spend</a> · <a href="#rate-limits" style="color:#a78bfa">#rate-limits</a> · <a href="#reconcile" style="color:#a78bfa">#reconcile</a> · <a href="#pricing" style="color:#a78bfa">#pricing</a></p>
+
+      <h3 id="spend" style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#777;margin:18px 0 10px">Spend cap</h3>
       <div class="tools">
         <div class="tool">
           <div class="tool-name">budget_clear(agent_id, model, estimated_tokens)</div>
@@ -344,6 +402,22 @@ app.get('/', (c) => {
           <div class="tool-name">get_balance()</div>
           <div class="tool-desc">Return the current account credit balance in USD.</div>
         </div>
+      </div>
+
+      <h3 id="rate-limits" style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#777;margin:18px 0 10px">Rate limits</h3>
+      <div class="tools">
+        <div class="tool">
+          <div class="tool-name">set_rate_envelope(agent_id, provider, model, requests_per_minute)</div>
+          <div class="tool-desc">Allocate a per-(agent, provider, model) rate share. Fixed 60-second windows.</div>
+        </div>
+        <div class="tool">
+          <div class="tool-name">rate_check(agent_id, provider, model)</div>
+          <div class="tool-desc">Approve or deny based on the agent's rate envelope. Returns retry_after_ms on denial.</div>
+        </div>
+      </div>
+
+      <h3 id="reconcile" style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#777;margin:18px 0 10px">Reconciler</h3>
+      <div class="tools">
         <div class="tool">
           <div class="tool-name">reconcile(agent_id, actual_input_tokens, actual_output_tokens)</div>
           <div class="tool-desc">After the LLM responds, apply the drift between estimated and actual cost. Keeps the envelope honest.</div>
@@ -363,21 +437,34 @@ curl -X POST https://gvnr.dev/v1/account
         <button onclick="(function(b){navigator.clipboard.writeText(document.getElementById('qs-url').textContent).then(()=>{var t=b.textContent;b.textContent='Copied!';setTimeout(()=>b.textContent=t,1500)})})(this)" style="border:none;border-radius:6px;padding:9px 14px;font-size:0.82rem;font-weight:500;cursor:pointer;background:#1a1a2e;color:#a78bfa;border:1px solid #2a2a4a;white-space:nowrap">Copy</button>
       </div>
 
-      <pre># 3. Set an envelope for your agent
+      <pre># 3. Set a spend envelope for your agent
 curl -X PUT \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"agent_id":"my-agent","limit_usd":5,"window":"daily"}' \\
   https://gvnr.dev/v1/budget/envelope
 
-# 4. Call before each LLM request
+# 4. Set a rate envelope (e.g. 30 Sonnet RPM via Anthropic)
+curl -X PUT \\
+  -H "Authorization: Bearer bg_YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"agent_id":"my-agent","provider":"anthropic","model":"claude-sonnet-4-6","requests_per_minute":30}' \\
+  https://gvnr.dev/v1/rate/envelope
+
+# 5. Before each LLM request: budget_clear then rate_check
 curl -X POST \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"agent_id":"my-agent","model":"claude-sonnet-4-6","estimated_tokens":2000}' \\
   https://gvnr.dev/v1/budget/clear
 
-# 5. After the LLM responds, reconcile against actual usage
+curl -X POST \\
+  -H "Authorization: Bearer bg_YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"agent_id":"my-agent","provider":"anthropic","model":"claude-sonnet-4-6"}' \\
+  https://gvnr.dev/v1/rate/check
+
+# 6. After the LLM responds, reconcile against actual usage
 curl -X POST \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
@@ -385,7 +472,7 @@ curl -X POST \\
   https://gvnr.dev/v1/budget/reconcile</pre>
     </section>
 
-    <section>
+    <section id="pricing">
       <h2>Model pricing</h2>
       <pre>claude-opus-4-7      $15.00 / $75.00  per M tokens (in / out)
 claude-sonnet-4-6     $3.00 / $15.00
@@ -482,7 +569,7 @@ function closeKeyModal() {
   var input = document.getElementById('api-key-input');
   input.value = key;
   input.dispatchEvent(new Event('input'));
-  document.getElementById('pricing').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.getElementById('credit-packs').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 </script>
 </body>
@@ -528,6 +615,7 @@ app.use('/v1/account/topup/*', async (c, next) => {
 app.route('/v1/account', accountRoutes);
 app.route('/v1/budget/envelope', envelopeRoutes);
 app.route('/v1/budget', budgetRoutes);
+app.route('/v1/rate', rateRoutes);
 
 // MCP server — Streamable HTTP transport, stateless, all verbs
 app.all('/mcp', mcpHandler);

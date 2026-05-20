@@ -14,6 +14,14 @@ export interface EnvelopeRecord {
   };
 }
 
+export interface RateEnvelopeRecord {
+  provider: string;     // 'anthropic', 'openai', 'bedrock', etc. — informational
+  model: string;        // e.g. 'claude-sonnet-4-6'
+  requests_per_minute: number;
+  window_start: number; // unix ms; window rolls when (now - window_start) >= 60_000
+  requests_in_window: number;
+}
+
 import type { AccountState } from './account-do';
 
 export interface Env {

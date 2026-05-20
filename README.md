@@ -1,6 +1,6 @@
 # Budget Governor
 
-Pre-call cap + post-call reconcile for AI agent spend. One MCP call before each LLM request, one after — stops estimate drift before your provider bill catches up.
+Pre-call governance for AI agents — spend caps, rate limits, post-call reconciliation. One MCP endpoint, one credit pool, no infrastructure to deploy.
 
 No deployment. No proxy. No self-hosting.
 
@@ -54,7 +54,7 @@ curl -X POST \
   https://gvnr.dev/v1/account/topup-verify/starter
 ```
 
-### 3. Set an envelope for your agent
+### 3. Set a spend envelope for your agent
 
 ```bash
 curl -X PUT \
@@ -65,7 +65,18 @@ curl -X PUT \
 # { "success": true, "agent_id": "my-agent", "limit_usd": 5, "window": "daily" }
 ```
 
-### 4. Call budget_clear before each LLM request
+### 4. Set a rate envelope per (agent, provider, model)
+
+```bash
+curl -X PUT \
+  -H "Authorization: Bearer bg_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id":"my-agent","provider":"anthropic","model":"claude-sonnet-4-6","requests_per_minute":30}' \
+  https://gvnr.dev/v1/rate/envelope
+# { "success": true, ... }
+```
+
+### 5. Before each LLM request: budget_clear then rate_check
 
 ```bash
 curl -X POST \
@@ -74,9 +85,16 @@ curl -X POST \
   -d '{"agent_id":"my-agent","model":"claude-sonnet-4-6","estimated_tokens":2000}' \
   https://gvnr.dev/v1/budget/clear
 # { "approved": true, "remaining_usd": 4.994 }
+
+curl -X POST \
+  -H "Authorization: Bearer bg_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id":"my-agent","provider":"anthropic","model":"claude-sonnet-4-6"}' \
+  https://gvnr.dev/v1/rate/check
+# { "allowed": true, "requests_remaining_this_minute": 29 }
 ```
 
-### 5. After the LLM responds, reconcile against actual usage
+### 6. After the LLM responds, reconcile against actual usage
 
 ```bash
 curl -X POST \
@@ -114,6 +132,8 @@ claude mcp add budget-governor --transport http \
 | `set_envelope(agent_id, limit_usd, window?)` | Create or update an agent's spend envelope |
 | `get_balance()` | Get current account credit balance |
 | `reconcile(agent_id, actual_input_tokens, actual_output_tokens)` | Apply the drift between estimated and actual cost after the LLM responds |
+| `set_rate_envelope(agent_id, provider, model, requests_per_minute)` | Allocate a per-(agent, provider, model) rate share |
+| `rate_check(agent_id, provider, model)` | Approve or deny based on the rate envelope; returns `retry_after_ms` on denial |
 
 ---
 

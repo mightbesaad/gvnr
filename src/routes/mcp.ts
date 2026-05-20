@@ -91,6 +91,39 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
     },
   );
 
+  server.registerTool(
+    'set_rate_envelope',
+    {
+      description: 'Create or update a rate-limit envelope for an (agent, provider, model) triple. Each envelope tracks requests per fixed 60-second window.',
+      inputSchema: {
+        agent_id: z.string().max(128).describe('The agent identifier'),
+        provider: z.string().max(64).describe('Provider name, e.g. anthropic, openai, bedrock'),
+        model: z.string().max(128).describe('Model identifier, e.g. claude-sonnet-4-6, gpt-4o'),
+        requests_per_minute: z.number().int().finite().positive().max(1_000_000).describe('Allowed requests per 60-second window'),
+      },
+    },
+    async ({ agent_id, provider, model, requests_per_minute }) => {
+      await stub.setRateEnvelope(agent_id, provider, model, requests_per_minute);
+      return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true, agent_id, provider, model, requests_per_minute }) }] };
+    },
+  );
+
+  server.registerTool(
+    'rate_check',
+    {
+      description: 'Check whether an agent is allowed to make a call against the rate envelope for the given (provider, model). Increments the counter on allow.',
+      inputSchema: {
+        agent_id: z.string().max(128).describe('The agent identifier'),
+        provider: z.string().max(64).describe('Provider name, e.g. anthropic, openai'),
+        model: z.string().max(128).describe('Model identifier, e.g. claude-sonnet-4-6'),
+      },
+    },
+    async ({ agent_id, provider, model }) => {
+      const result = await stub.checkRate(agent_id, provider, model);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
+    },
+  );
+
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
