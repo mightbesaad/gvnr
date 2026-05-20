@@ -663,6 +663,78 @@ describe('Rate Limit Coordinator', () => {
   });
 });
 
+// ── Idempotency Service ───────────────────────────────────────────────────────
+
+describe('Idempotency Service', () => {
+  async function check(apiKey: string, body: { key: string; ttl_seconds?: number }) {
+    return SELF.fetch('http://localhost/v1/idempotency/check', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('first call returns is_first_call=true with ttl_remaining_seconds=ttl', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await check(apiKey, { key: 'job-1', ttl_seconds: 60 });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ is_first_call: boolean; ttl_remaining_seconds: number }>();
+    expect(body.is_first_call).toBe(true);
+    expect(body.ttl_remaining_seconds).toBe(60);
+  });
+
+  it('replay within TTL returns is_first_call=false with positive remaining', async () => {
+    const { apiKey } = await provisionAccount();
+    await check(apiKey, { key: 'job-2', ttl_seconds: 60 });
+    const replay = await check(apiKey, { key: 'job-2', ttl_seconds: 60 });
+    expect(replay.status).toBe(200);
+    const body = await replay.json<{ is_first_call: boolean; ttl_remaining_seconds: number }>();
+    expect(body.is_first_call).toBe(false);
+    expect(body.ttl_remaining_seconds).toBeGreaterThan(0);
+    expect(body.ttl_remaining_seconds).toBeLessThanOrEqual(60);
+  });
+
+  it('different accounts with the same key both see is_first_call=true (account isolation)', async () => {
+    const { apiKey: a } = await provisionAccount();
+    const { apiKey: b } = await provisionAccount();
+
+    const aRes = await check(a, { key: 'shared-key', ttl_seconds: 60 });
+    const bRes = await check(b, { key: 'shared-key', ttl_seconds: 60 });
+
+    expect((await aRes.json<{ is_first_call: boolean }>()).is_first_call).toBe(true);
+    expect((await bRes.json<{ is_first_call: boolean }>()).is_first_call).toBe(true);
+  });
+
+  it('uses default TTL when ttl_seconds is omitted', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await check(apiKey, { key: 'default-ttl-key' });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ is_first_call: boolean; ttl_remaining_seconds: number }>();
+    expect(body.is_first_call).toBe(true);
+    expect(body.ttl_remaining_seconds).toBe(3600); // DEFAULT_TTL_SECONDS
+  });
+
+  it('rejects invalid params (empty key, ttl <= 0, ttl > 30 days, missing key)', async () => {
+    const { apiKey } = await provisionAccount();
+
+    const emptyKey = await check(apiKey, { key: '' });
+    expect(emptyKey.status).toBe(400);
+
+    const negTtl = await check(apiKey, { key: 'k', ttl_seconds: -1 });
+    expect(negTtl.status).toBe(400);
+
+    const hugeTtl = await check(apiKey, { key: 'k', ttl_seconds: 31 * 24 * 60 * 60 });
+    expect(hugeTtl.status).toBe(400);
+
+    const missing = await SELF.fetch('http://localhost/v1/idempotency/check', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ttl_seconds: 60 }),
+    });
+    expect(missing.status).toBe(400);
+  });
+});
+
 // ── Payment UI ───────────────────────────────────────────────────────────────
 
 describe('GET /v1/packs/:pack/info', () => {

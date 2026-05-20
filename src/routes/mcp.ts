@@ -5,6 +5,7 @@ import type { Context } from 'hono';
 import type { Env } from '../lib/types';
 import { getAccount } from '../lib/kv';
 import { nextDailyReset } from '../lib/models';
+import { checkIdempotency, DEFAULT_TTL_SECONDS, MAX_TTL_SECONDS } from './idempotency';
 
 export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Response> {
   const apiKey =
@@ -23,7 +24,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   const accountId = account.account_id;
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
 
-  const server = new McpServer({ name: 'budget-governor', version: '1.2.0' });
+  const server = new McpServer({ name: 'budget-governor', version: '1.3.0' });
 
   server.registerTool(
     'budget_clear',
@@ -120,6 +121,21 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
     },
     async ({ agent_id, provider, model }) => {
       const result = await stub.checkRate(agent_id, provider, model);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.registerTool(
+    'idempotency_check',
+    {
+      description: 'Dedupe retries on a caller-supplied key. Returns is_first_call=true the first time a key is seen, false on subsequent calls within TTL. Use to prevent double-charges, double-emails, or double-side-effects from agent retry loops.',
+      inputSchema: {
+        key: z.string().min(1).max(256).describe('Idempotency key — unique per logical operation'),
+        ttl_seconds: z.number().int().finite().positive().max(MAX_TTL_SECONDS).optional().describe('Time-to-live in seconds (default 3600, max 30 days)'),
+      },
+    },
+    async ({ key, ttl_seconds }) => {
+      const result = await checkIdempotency(c.env.BUDGET_KV, accountId, key, ttl_seconds ?? DEFAULT_TTL_SECONDS);
       return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
     },
   );

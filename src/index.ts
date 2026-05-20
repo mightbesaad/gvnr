@@ -6,6 +6,7 @@ import accountRoutes from './routes/account';
 import envelopeRoutes from './routes/envelope';
 import budgetRoutes from './routes/budget';
 import rateRoutes from './routes/rate';
+import idempotencyRoutes from './routes/idempotency';
 import payRoutes from './routes/pay';
 import tosRoutes from './routes/tos';
 import { getAccount } from './lib/kv';
@@ -101,6 +102,13 @@ app.get('/.well-known/agent-skills/index.json', (c) => {
         url: 'https://gvnr.dev/mcp',
         sha256: 'f9a2bd5e4d21c3e278efee3a439df65be1d08854ee2d90ddcb15092ecf67fc83',
       },
+      {
+        name: 'idempotency_check',
+        type: 'mcp',
+        description: 'Dedupe retries on a caller-supplied key. Returns is_first_call=true the first time a key is seen, false on subsequent calls within TTL. Use to prevent double-charges, double-emails, or double-side-effects from agent retry loops.',
+        url: 'https://gvnr.dev/mcp',
+        sha256: 'edfe3444996affb1e29d86d7ac7768d33d15251e7c58c505dc1469738999a589',
+      },
     ],
   });
 });
@@ -121,8 +129,8 @@ app.get('/.well-known/mcp.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     name: 'Budget Governor',
-    description: 'Spend caps, rate-limit coordination, and post-call reconciliation for AI agents — one MCP endpoint, one credit pool.',
-    version: '1.2.0',
+    description: 'Substrate primitives for AI agents — spend caps, rate limits, idempotency, and post-call reconciliation. One MCP endpoint, one credit pool.',
+    version: '1.3.0',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
     authentication: {
@@ -136,6 +144,7 @@ app.get('/.well-known/mcp.json', (c) => {
       { name: 'reconcile', description: 'Reconcile a prior budget_clear with actual usage; applies the drift to envelope and balance' },
       { name: 'set_rate_envelope', description: 'Create or update a rate-limit envelope per (agent, provider, model)' },
       { name: 'rate_check', description: 'Check whether an agent is allowed to make a call against the rate envelope; increments the counter on allow' },
+      { name: 'idempotency_check', description: 'Dedupe retries on a caller-supplied key; returns is_first_call=true on first call, false on replays within TTL' },
     ],
   });
 });
@@ -144,7 +153,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Budget Governor', version: '1.2.0', description: 'Spend caps, rate-limit coordination, and post-call reconciliation for AI agents.' },
+    info: { title: 'Budget Governor', version: '1.3.0', description: 'Substrate primitives for AI agents — spend caps, rate limits, idempotency, and post-call reconciliation.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
@@ -228,6 +237,14 @@ app.get('/openapi.json', (c) => {
           responses: { '200': { description: 'Returns allowed (bool), reason or requests_remaining_this_minute, optional retry_after_ms' } },
         },
       },
+      '/v1/idempotency/check': {
+        post: {
+          summary: 'Dedupe retries on a caller-supplied key — first call stores it, subsequent calls within TTL return is_first_call=false',
+          security: [{ bearerAuth: [] }],
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { key: { type: 'string', minLength: 1, maxLength: 256 }, ttl_seconds: { type: 'integer', minimum: 1, maximum: 2592000 } }, required: ['key'] } } } },
+          responses: { '200': { description: 'Returns is_first_call (bool), ttl_remaining_seconds (int)' } },
+        },
+      },
       '/v1/budget/envelope': {
         put: {
           summary: 'Create or update agent spend envelope',
@@ -285,9 +302,9 @@ app.get('/', (c) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gvnr — pre-call governance for AI agents</title>
-  <meta name="description" content="Pre-call governance for AI agents — spend caps, rate limits, post-call reconciliation. One MCP endpoint, one credit pool.">
+  <meta name="description" content="Substrate primitives for AI agents — spend caps, rate limits, idempotency, post-call reconciliation. One MCP endpoint, one credit pool.">
   <meta property="og:title" content="Gvnr">
-  <meta property="og:description" content="Pre-call governance for AI agents — spend caps, rate limits, post-call reconciliation. One MCP endpoint, one credit pool.">
+  <meta property="og:description" content="Substrate primitives for AI agents — spend caps, rate limits, idempotency, post-call reconciliation. One MCP endpoint, one credit pool.">
   <meta property="og:url" content="https://gvnr.dev">
   <meta property="og:type" content="website">
   <meta name="robots" content="index, follow">
@@ -347,8 +364,8 @@ app.get('/', (c) => {
 <body>
   <div class="container">
     <h1>Gvnr</h1>
-    <p class="tagline">Pre-call governance for AI agents — spend caps, rate limits, reconciliation.</p>
-    <p class="value-prop">One MCP endpoint, one credit pool. Compose <code style="font-family:monospace;color:#a78bfa">budget_clear → rate_check → call LLM → reconcile</code> before every provider request — no infrastructure to deploy.</p>
+    <p class="tagline">Substrate primitives for AI agents — spend, rate, dedup, reconcile.</p>
+    <p class="value-prop">One MCP endpoint, one credit pool. Compose <code style="font-family:monospace;color:#a78bfa">budget_clear → rate_check → idempotency_check → call LLM → reconcile</code> before every provider request — no infrastructure to deploy.</p>
 
     <div class="header-row">
       <div class="status">
@@ -386,7 +403,7 @@ app.get('/', (c) => {
 
     <section id="tools">
       <h2>MCP Tools</h2>
-      <p style="font-size:0.82rem;color:#888;margin-bottom:14px">Jump to: <a href="#spend" style="color:#a78bfa">#spend</a> · <a href="#rate-limits" style="color:#a78bfa">#rate-limits</a> · <a href="#reconcile" style="color:#a78bfa">#reconcile</a> · <a href="#pricing" style="color:#a78bfa">#pricing</a></p>
+      <p style="font-size:0.82rem;color:#888;margin-bottom:14px">Jump to: <a href="#spend" style="color:#a78bfa">#spend</a> · <a href="#rate-limits" style="color:#a78bfa">#rate-limits</a> · <a href="#reconcile" style="color:#a78bfa">#reconcile</a> · <a href="#idempotency" style="color:#a78bfa">#idempotency</a> · <a href="#pricing" style="color:#a78bfa">#pricing</a></p>
 
       <h3 id="spend" style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#777;margin:18px 0 10px">Spend cap</h3>
       <div class="tools">
@@ -421,6 +438,14 @@ app.get('/', (c) => {
         <div class="tool">
           <div class="tool-name">reconcile(agent_id, actual_input_tokens, actual_output_tokens)</div>
           <div class="tool-desc">After the LLM responds, apply the drift between estimated and actual cost. Keeps the envelope honest.</div>
+        </div>
+      </div>
+
+      <h3 id="idempotency" style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#777;margin:18px 0 10px">Idempotency</h3>
+      <div class="tools">
+        <div class="tool">
+          <div class="tool-name">idempotency_check(key, ttl_seconds?)</div>
+          <div class="tool-desc">Dedupe retries on a caller-supplied key. Returns is_first_call=true the first time, false on replays within TTL.</div>
         </div>
       </div>
     </section>
@@ -616,6 +641,7 @@ app.route('/v1/account', accountRoutes);
 app.route('/v1/budget/envelope', envelopeRoutes);
 app.route('/v1/budget', budgetRoutes);
 app.route('/v1/rate', rateRoutes);
+app.route('/v1/idempotency', idempotencyRoutes);
 
 // MCP server — Streamable HTTP transport, stateless, all verbs
 app.all('/mcp', mcpHandler);

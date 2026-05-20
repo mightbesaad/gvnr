@@ -1,6 +1,6 @@
 # Budget Governor
 
-Pre-call governance for AI agents — spend caps, rate limits, post-call reconciliation. One MCP endpoint, one credit pool, no infrastructure to deploy.
+Substrate primitives for AI agents — spend caps, rate limits, idempotency, post-call reconciliation. One MCP endpoint, one credit pool, no infrastructure to deploy.
 
 No deployment. No proxy. No self-hosting.
 
@@ -94,7 +94,19 @@ curl -X POST \
 # { "allowed": true, "requests_remaining_this_minute": 29 }
 ```
 
-### 6. After the LLM responds, reconcile against actual usage
+### 6. (optional) Dedupe retries with `idempotency_check`
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer bg_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"key":"job-abc-123","ttl_seconds":3600}' \
+  https://gvnr.dev/v1/idempotency/check
+# First call:  { "is_first_call": true,  "ttl_remaining_seconds": 3600 }
+# Replay:      { "is_first_call": false, "ttl_remaining_seconds": 3598 }
+```
+
+### 7. After the LLM responds, reconcile against actual usage
 
 ```bash
 curl -X POST \
@@ -134,6 +146,7 @@ claude mcp add budget-governor --transport http \
 | `reconcile(agent_id, actual_input_tokens, actual_output_tokens)` | Apply the drift between estimated and actual cost after the LLM responds |
 | `set_rate_envelope(agent_id, provider, model, requests_per_minute)` | Allocate a per-(agent, provider, model) rate share |
 | `rate_check(agent_id, provider, model)` | Approve or deny based on the rate envelope; returns `retry_after_ms` on denial |
+| `idempotency_check(key, ttl_seconds?)` | Dedupe retries on a caller-supplied key; returns `is_first_call` |
 
 ---
 
