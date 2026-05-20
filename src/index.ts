@@ -489,7 +489,14 @@ curl -X POST \\
   -d '{"agent_id":"my-agent","provider":"anthropic","model":"claude-sonnet-4-6"}' \\
   https://gvnr.dev/v1/rate/check
 
-# 6. After the LLM responds, reconcile against actual usage
+# 6. (optional) Dedupe retries with idempotency_check
+curl -X POST \\
+  -H "Authorization: Bearer bg_YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"key":"job-abc-123","ttl_seconds":3600}' \\
+  https://gvnr.dev/v1/idempotency/check
+
+# 7. After the LLM responds, reconcile against actual usage
 curl -X POST \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
