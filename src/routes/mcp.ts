@@ -23,7 +23,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   const accountId = account.account_id;
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
 
-  const server = new McpServer({ name: 'budget-governor', version: '1.0.0' });
+  const server = new McpServer({ name: 'budget-governor', version: '1.2.0' });
 
   server.registerTool(
     'budget_clear',
