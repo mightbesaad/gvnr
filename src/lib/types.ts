@@ -7,6 +7,11 @@ export interface EnvelopeRecord {
   spent_usd: number;
   window: 'daily' | 'session';
   reset_at: number; // unix ms — next reset time for daily window
+  pending_estimate?: {
+    model: string;
+    estimated_cost_usd: number;
+    estimated_at: number; // unix ms
+  };
 }
 
 import type { AccountState } from './account-do';

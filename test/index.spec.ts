@@ -312,6 +312,153 @@ describe('POST /v1/budget/clear', () => {
   });
 });
 
+// ── POST /v1/budget/reconcile ─────────────────────────────────────────────────
+
+describe('POST /v1/budget/reconcile', () => {
+  async function setupClearance(opts: { credits?: number; model?: string; estimated_tokens?: number; limit?: number } = {}) {
+    const credits = opts.credits ?? 10;
+    const model = opts.model ?? 'claude-sonnet-4-6';
+    const tokens = opts.estimated_tokens ?? 1000;
+    const limit = opts.limit ?? 10;
+
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, credits);
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', limit_usd: limit }),
+    });
+    await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', model, estimated_tokens: tokens }),
+    });
+    return { apiKey };
+  }
+
+  it('actual > estimate: positive drift applied (under 2x threshold)', async () => {
+    // sonnet 1000 out → est $0.015; actual 500 in + 1500 out = $0.024 (1.6x); drift = +$0.009
+    const { apiKey } = await setupClearance({ credits: 10, estimated_tokens: 1000 });
+    const res = await SELF.fetch('http://localhost/v1/budget/reconcile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', actual_input_tokens: 500, actual_output_tokens: 1500 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ ok: boolean; drift_usd: number; remaining_usd: number; balance_usd: number; warning?: string }>();
+    expect(body.ok).toBe(true);
+    expect(body.drift_usd).toBeCloseTo(0.009, 6);
+    expect(body.warning).toBeUndefined();
+    expect(body.balance_usd).toBeCloseTo(9.976, 6);
+  });
+
+  it('actual < estimate: negative drift refunds', async () => {
+    // sonnet 5000 out → est $0.075; actual 100 in + 200 out = $0.0033; drift = -$0.0717
+    const { apiKey } = await setupClearance({ credits: 10, estimated_tokens: 5000 });
+    const res = await SELF.fetch('http://localhost/v1/budget/reconcile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', actual_input_tokens: 100, actual_output_tokens: 200 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ drift_usd: number; balance_usd: number }>();
+    expect(body.drift_usd).toBeCloseTo(-0.0717, 6);
+    expect(body.balance_usd).toBeCloseTo(9.9967, 6);
+  });
+
+  it('actual == estimate: drift = 0', async () => {
+    // est = (1000/1e6)*15 = $0.015; actual 0 in + 1000 out = $0.015
+    const { apiKey } = await setupClearance({ credits: 10, estimated_tokens: 1000 });
+    const res = await SELF.fetch('http://localhost/v1/budget/reconcile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', actual_input_tokens: 0, actual_output_tokens: 1000 }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json<{ drift_usd: number }>()).drift_usd).toBe(0);
+  });
+
+  it('error: no prior budget_clear → no_pending_clearance', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10);
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', limit_usd: 5 }),
+    });
+    const res = await SELF.fetch('http://localhost/v1/budget/reconcile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', actual_input_tokens: 100, actual_output_tokens: 200 }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('no_pending_clearance');
+  });
+
+  it('error: no envelope at all → no_envelope', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/budget/reconcile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'no-such-agent', actual_input_tokens: 100, actual_output_tokens: 200 }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('no_envelope');
+  });
+
+  it('double reconcile: second returns no_pending_clearance', async () => {
+    const { apiKey } = await setupClearance({ credits: 10, estimated_tokens: 1000 });
+    const first = await SELF.fetch('http://localhost/v1/budget/reconcile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', actual_input_tokens: 100, actual_output_tokens: 1000 }),
+    });
+    expect(first.status).toBe(200);
+
+    const second = await SELF.fetch('http://localhost/v1/budget/reconcile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', actual_input_tokens: 100, actual_output_tokens: 1000 }),
+    });
+    expect(second.status).toBe(400);
+    expect((await second.json<{ error: string }>()).error).toBe('no_pending_clearance');
+  });
+
+  it('actual > 2x estimate: applied with drift_exceeds_2x_threshold warning + log', async () => {
+    // est = (100/1e6)*15 = $0.0015; actual 0 in + 10000 out = $0.15 → 100x estimate
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { apiKey } = await setupClearance({ credits: 10, estimated_tokens: 100, limit: 10 });
+    const res = await SELF.fetch('http://localhost/v1/budget/reconcile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', actual_input_tokens: 0, actual_output_tokens: 10_000 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ drift_usd: number; warning?: string }>();
+    expect(body.drift_usd).toBeCloseTo(0.1485, 6);
+    expect(body.warning).toBe('drift_exceeds_2x_threshold');
+
+    const logged = logSpy.mock.calls.map(c => String(c[0])).find(s => s.includes('drift_warning'));
+    expect(logged).toBeTruthy();
+    const parsed = JSON.parse(logged!);
+    expect(parsed.event).toBe('drift_warning');
+    expect(parsed.model).toBe('claude-sonnet-4-6');
+    logSpy.mockRestore();
+  });
+
+  it('unknown model: uses DEFAULT_PRICE (Opus rate) for actual', async () => {
+    // est at default: (1000/1e6)*75 = $0.075; actual 1000 in + 1000 out at default = $0.09; drift = +$0.015
+    const { apiKey } = await setupClearance({ credits: 10, estimated_tokens: 1000, model: 'totally-unknown-model-xyz' });
+    const res = await SELF.fetch('http://localhost/v1/budget/reconcile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'test-agent', actual_input_tokens: 1000, actual_output_tokens: 1000 }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json<{ drift_usd: number }>()).drift_usd).toBeCloseTo(0.015, 6);
+  });
+});
+
 // ── Payment UI ───────────────────────────────────────────────────────────────
 
 describe('GET /v1/packs/:pack/info', () => {

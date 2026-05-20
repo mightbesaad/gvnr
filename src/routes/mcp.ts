@@ -75,6 +75,22 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
     },
   );
 
+  server.registerTool(
+    'reconcile',
+    {
+      description: 'Reconcile a previous budget_clear with actual usage from the LLM response. Applies the drift (actual minus estimated cost) to the agent envelope and account balance.',
+      inputSchema: {
+        agent_id: z.string().max(128).describe('The agent identifier'),
+        actual_input_tokens: z.number().int().finite().nonnegative().describe('Actual input tokens reported by the LLM provider'),
+        actual_output_tokens: z.number().int().finite().nonnegative().describe('Actual output tokens reported by the LLM provider'),
+      },
+    },
+    async ({ agent_id, actual_input_tokens, actual_output_tokens }) => {
+      const result = await stub.applyReconciliation(agent_id, actual_input_tokens, actual_output_tokens);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
+    },
+  );
+
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

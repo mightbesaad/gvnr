@@ -1,6 +1,6 @@
 # Budget Governor
 
-Hard cap on estimated AI agent spend. One MCP call before each LLM request — approved or denied before the call reaches any provider.
+Pre-call cap + post-call reconcile for AI agent spend. One MCP call before each LLM request, one after — stops estimate drift before your provider bill catches up.
 
 No deployment. No proxy. No self-hosting.
 
@@ -76,6 +76,19 @@ curl -X POST \
 # { "approved": true, "remaining_usd": 4.994 }
 ```
 
+### 5. After the LLM responds, reconcile against actual usage
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer bg_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id":"my-agent","actual_input_tokens":1800,"actual_output_tokens":2400}' \
+  https://gvnr.dev/v1/budget/reconcile
+# { "ok": true, "drift_usd": 0.003, "remaining_usd": 4.991, "balance_usd": 9.991 }
+```
+
+`reconcile` is optional but keeps the envelope honest — Anthropic, OpenAI, and Gemini all return `usage` fields with the actual token counts; pass those in.
+
 ---
 
 ## MCP setup
@@ -100,6 +113,7 @@ claude mcp add budget-governor --transport http \
 | `budget_clear(agent_id, model, estimated_tokens)` | Check clearance and deduct estimated cost |
 | `set_envelope(agent_id, limit_usd, window?)` | Create or update an agent's spend envelope |
 | `get_balance()` | Get current account credit balance |
+| `reconcile(agent_id, actual_input_tokens, actual_output_tokens)` | Apply the drift between estimated and actual cost after the LLM responds |
 
 ---
 

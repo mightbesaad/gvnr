@@ -79,6 +79,13 @@ app.get('/.well-known/agent-skills/index.json', (c) => {
         url: 'https://gvnr.dev/mcp',
         sha256: '5f0e5e27eb2d2e1dd303892eb46edea7e6987524284e5f646e739300e9bc355f',
       },
+      {
+        name: 'reconcile',
+        type: 'mcp',
+        description: 'Reconcile a previous budget_clear with actual usage from the LLM response. Applies the drift (actual minus estimated cost) to the agent envelope and account balance.',
+        url: 'https://gvnr.dev/mcp',
+        sha256: '0fabe12e7ca5a969b3726e6fa1943e911e91b85a7580fc6bd1ec30720ef5d62e',
+      },
     ],
   });
 });
@@ -99,8 +106,8 @@ app.get('/.well-known/mcp.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     name: 'Budget Governor',
-    description: 'Hard cap on estimated AI agent spend. Check clearance and track spend before each LLM call.',
-    version: '1.0.0',
+    description: 'Pre-call cap + post-call reconciliation for AI agent spend. Check clearance before each LLM call, then reconcile against actual usage.',
+    version: '1.1.0',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
     authentication: {
@@ -111,6 +118,7 @@ app.get('/.well-known/mcp.json', (c) => {
       { name: 'budget_clear', description: 'Check if an agent is authorized to spend tokens and deduct the estimated cost' },
       { name: 'set_envelope', description: 'Create or update a spend envelope for an agent' },
       { name: 'get_balance', description: 'Get current account credit balance in USD' },
+      { name: 'reconcile', description: 'Reconcile a prior budget_clear with actual usage; applies the drift to envelope and balance' },
     ],
   });
 });
@@ -119,7 +127,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Budget Governor', version: '1.0.0', description: 'Hard cap on estimated AI agent spend.' },
+    info: { title: 'Budget Governor', version: '1.1.0', description: 'Pre-call cap + post-call reconciliation for AI agent spend.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
@@ -155,6 +163,14 @@ app.get('/openapi.json', (c) => {
           security: [{ bearerAuth: [] }],
           requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, model: { type: 'string' }, estimated_tokens: { type: 'integer' } }, required: ['agent_id', 'model', 'estimated_tokens'] } } } },
           responses: { '200': { description: 'Returns approved (bool), remaining_usd, optional reason' } },
+        },
+      },
+      '/v1/budget/reconcile': {
+        post: {
+          summary: 'Reconcile a prior clearance with actual LLM usage; applies drift to envelope and balance',
+          security: [{ bearerAuth: [] }],
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, actual_input_tokens: { type: 'integer', minimum: 0 }, actual_output_tokens: { type: 'integer', minimum: 0 } }, required: ['agent_id', 'actual_input_tokens', 'actual_output_tokens'] } } } },
+          responses: { '200': { description: 'Returns drift_usd, remaining_usd, balance_usd, optional warning' } },
         },
       },
       '/v1/budget/envelope': {
@@ -214,9 +230,9 @@ app.get('/', (c) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Budget Governor — AI agent spend caps</title>
-  <meta name="description" content="Hard cap on estimated AI agent spend. One MCP call before each LLM request stops runaway estimates before they hit your bill.">
+  <meta name="description" content="Pre-call cap + post-call reconcile for AI agent spend. Stops estimate drift before your provider bill catches up.">
   <meta property="og:title" content="Budget Governor">
-  <meta property="og:description" content="Hard cap on estimated AI agent spend. One MCP call before each LLM request — stops runaway estimates before they hit your bill.">
+  <meta property="og:description" content="Pre-call cap + post-call reconcile for AI agent spend. Stops estimate drift before your provider bill catches up.">
   <meta property="og:url" content="https://gvnr.dev">
   <meta property="og:type" content="website">
   <meta name="robots" content="index, follow">
@@ -276,8 +292,8 @@ app.get('/', (c) => {
 <body>
   <div class="container">
     <h1>Budget Governor</h1>
-    <p class="tagline">Hard cap on estimated AI agent spend — one call, before the LLM request.</p>
-    <p class="value-prop">Stop runaway estimates before they hit your bill. Set a $5/day cap per agent, get approved or denied in one MCP call.</p>
+    <p class="tagline">Pre-call cap + post-call reconcile for AI agent spend.</p>
+    <p class="value-prop">Stops estimate drift before your provider bill catches up. Set a $5/day cap per agent, get approved or denied in one call, then reconcile against actual usage.</p>
 
     <div class="header-row">
       <div class="status">
@@ -328,6 +344,10 @@ app.get('/', (c) => {
           <div class="tool-name">get_balance()</div>
           <div class="tool-desc">Return the current account credit balance in USD.</div>
         </div>
+        <div class="tool">
+          <div class="tool-name">reconcile(agent_id, actual_input_tokens, actual_output_tokens)</div>
+          <div class="tool-desc">After the LLM responds, apply the drift between estimated and actual cost. Keeps the envelope honest.</div>
+        </div>
       </div>
     </section>
 
@@ -355,7 +375,14 @@ curl -X POST \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"agent_id":"my-agent","model":"claude-sonnet-4-6","estimated_tokens":2000}' \\
-  https://gvnr.dev/v1/budget/clear</pre>
+  https://gvnr.dev/v1/budget/clear
+
+# 5. After the LLM responds, reconcile against actual usage
+curl -X POST \\
+  -H "Authorization: Bearer bg_YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"agent_id":"my-agent","actual_input_tokens":1800,"actual_output_tokens":2400}' \\
+  https://gvnr.dev/v1/budget/reconcile</pre>
     </section>
 
     <section>
@@ -366,7 +393,7 @@ claude-haiku-4-5      $0.80 /  $4.00
 gpt-4o                $2.50 / $10.00
 gpt-4o-mini           $0.15 /  $0.60
 gemini-1-5-pro        $1.25 /  $3.50</pre>
-      <p style="font-size:0.8rem;color:#888;margin-top:10px">budget_clear deducts estimated output cost. Unused tokens are not charged. Unlisted models default to $75.00/M output tokens (Opus rate — fail-safe). Caps enforce on pre-call estimates, not actual provider bills. Updated May 2026.</p>
+      <p style="font-size:0.8rem;color:#888;margin-top:10px">budget_clear deducts estimated output cost; reconcile applies the drift using both input and output rates. Unlisted models default to $75.00/M output tokens (Opus rate — fail-safe). Updated May 2026.</p>
     </section>
 
     <footer>

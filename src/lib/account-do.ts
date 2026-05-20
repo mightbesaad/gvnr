@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { EnvelopeRecord } from './types';
-import { estimateCostUsd, nextDailyReset, roundUsd } from './models';
+import { actualCostUsd, estimateCostUsd, nextDailyReset, roundUsd } from './models';
 
 interface DoEnv {
   BUDGET_KV: KVNamespace;
@@ -11,6 +11,16 @@ export interface ClearanceResult {
   remaining_usd: number;
   reason?: 'no_credits' | 'no_envelope' | 'envelope_exceeded';
 }
+
+export type ReconcileResult =
+  | { ok: false; error: 'no_envelope' | 'no_pending_clearance' }
+  | {
+      ok: true;
+      drift_usd: number;
+      remaining_usd: number;
+      balance_usd: number;
+      warning?: 'drift_exceeds_2x_threshold';
+    };
 
 export class AccountState extends DurableObject<DoEnv> {
   private balance = 0;
@@ -79,11 +89,58 @@ export class AccountState extends DurableObject<DoEnv> {
 
     env.spent_usd += estimatedCost;
     this.balance = roundUsd(this.balance - estimatedCost);
+    env.pending_estimate = {
+      model,
+      estimated_cost_usd: estimatedCost,
+      estimated_at: Date.now(),
+    };
     this.envelopes.set(agentId, env);
     await this.ctx.storage.put('envelopes', Object.fromEntries(this.envelopes));
     await this.ctx.storage.put('balance', this.balance);
 
     return { approved: true, remaining_usd: roundUsd(env.limit_usd - env.spent_usd) };
+  }
+
+  async applyReconciliation(
+    agentId: string,
+    actualInputTokens: number,
+    actualOutputTokens: number,
+  ): Promise<ReconcileResult> {
+    const env = this.envelopes.get(agentId);
+    if (!env) return { ok: false, error: 'no_envelope' };
+    if (!env.pending_estimate) return { ok: false, error: 'no_pending_clearance' };
+
+    const { model, estimated_cost_usd } = env.pending_estimate;
+    const actual = actualCostUsd(model, actualInputTokens, actualOutputTokens);
+    const drift = roundUsd(actual - estimated_cost_usd);
+
+    env.spent_usd = roundUsd(env.spent_usd + drift);
+    this.balance = roundUsd(this.balance - drift);
+    env.pending_estimate = undefined;
+
+    this.envelopes.set(agentId, env);
+    await this.ctx.storage.put('envelopes', Object.fromEntries(this.envelopes));
+    await this.ctx.storage.put('balance', this.balance);
+
+    const warning = actual > 2 * estimated_cost_usd ? 'drift_exceeds_2x_threshold' : undefined;
+    if (warning) {
+      console.log(JSON.stringify({
+        event: 'drift_warning',
+        agent_id: agentId,
+        model,
+        estimated_cost_usd,
+        actual_cost_usd: actual,
+        drift_usd: drift,
+      }));
+    }
+
+    return {
+      ok: true,
+      drift_usd: drift,
+      remaining_usd: roundUsd(env.limit_usd - env.spent_usd),
+      balance_usd: this.balance,
+      warning,
+    };
   }
 
   async setEnvelope(agentId: string, envelope: EnvelopeRecord): Promise<void> {
