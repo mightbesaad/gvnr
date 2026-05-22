@@ -75,6 +75,14 @@ async function decide(approvalId, decision, headers = {}) {
   });
 }
 
+// Each section that hits request_approval should provision a fresh account so
+// we don't bleed quota across sections (APPROVAL_RATE_LIMITER = 30/min/account).
+async function freshSetup() {
+  const { api_key } = await provisionAccount();
+  await setNotificationEmail(api_key, 'stress@example.com');
+  return api_key;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -82,8 +90,7 @@ async function main() {
 
   // ── Section 1: Token entropy + URL shape ──────────────────────────────────
   console.log(c.section('Token entropy + URL shape'));
-  const { api_key: apiKey } = await provisionAccount();
-  await setNotificationEmail(apiKey, 'stress-test@example.com');
+  let apiKey = await freshSetup();
 
   const ids = new Set();
   let nonUrlSafe = 0;
@@ -106,6 +113,7 @@ async function main() {
 
   // ── Section 2: Auth boundary ──────────────────────────────────────────────
   console.log(c.section('Auth boundary on /v1/approval/*'));
+  apiKey = await freshSetup();
   const noAuth = await req('/v1/approval/check/whatever');
   check(noAuth.status === 401, '/v1/approval/check requires auth', `got ${noAuth.status}`);
 
@@ -124,6 +132,7 @@ async function main() {
 
   // ── Section 3: Bearer-URL model on /approve/* ─────────────────────────────
   console.log(c.section('Bearer-URL model on /approve/*'));
+  apiKey = await freshSetup();
   const pageReq = await requestApproval(apiKey, { agent_id: 'a', action_summary: 'page test', ttl_seconds: 600 });
   const pageId = pageReq.body.approval_id;
 
@@ -143,6 +152,7 @@ async function main() {
 
   // ── Section 4: Input validation edges ─────────────────────────────────────
   console.log(c.section('Input validation edges'));
+  apiKey = await freshSetup();
   const cases = [
     { name: 'empty agent_id',          body: { agent_id: '', action_summary: 'x' } },
     { name: 'agent_id at 128 chars',   body: { agent_id: 'a'.repeat(128), action_summary: 'x' }, expectOk: true },
@@ -179,6 +189,7 @@ async function main() {
 
   // ── Section 5: XSS / HTML injection ───────────────────────────────────────
   console.log(c.section('XSS / HTML injection on approval page'));
+  apiKey = await freshSetup();
   const xss = '<script>alert(1)</script><img src=x onerror=alert(2)>';
   const xssReq = await requestApproval(apiKey, { agent_id: 'a<b>c', action_summary: xss, ttl_seconds: 600 });
   check(xssReq.status === 200, 'XSS payload in action_summary accepted (will be escaped on render)', JSON.stringify(xssReq.body).slice(0, 200));
@@ -192,6 +203,7 @@ async function main() {
 
   // ── Section 6: Repeat decide / race ───────────────────────────────────────
   console.log(c.section('Repeat decide & race'));
+  apiKey = await freshSetup();
   const rd = await requestApproval(apiKey, { agent_id: 'a', action_summary: 'repeat test', ttl_seconds: 600 });
   const rdId = rd.body.approval_id;
   const first1 = await decide(rdId, 'approved');
@@ -217,6 +229,7 @@ async function main() {
 
   // ── Section 7: Decide endpoint variants ───────────────────────────────────
   console.log(c.section('Decide endpoint shape'));
+  apiKey = await freshSetup();
   const sh = await requestApproval(apiKey, { agent_id: 'a', action_summary: 'shape test', ttl_seconds: 600 });
   const shId = sh.body.approval_id;
 
@@ -278,6 +291,7 @@ async function main() {
 
   // ── Section 9: TTL boundary — timeout state ───────────────────────────────
   console.log(c.section('TTL boundary'));
+  apiKey = await freshSetup();
   const timeoutReq = await requestApproval(apiKey, { agent_id: 'a', action_summary: 'timeout test', ttl_seconds: 1 });
   if (timeoutReq.status === 200) {
     const tId = timeoutReq.body.approval_id;
@@ -295,6 +309,7 @@ async function main() {
 
   // ── Section 10: Credit accounting (gap discovery) ─────────────────────────
   console.log(c.section('Credit accounting'));
+  apiKey = await freshSetup();
   const balanceBefore = await req('/v1/account/balance', { headers: { Authorization: `Bearer ${apiKey}` } });
   // Fire a few approval calls
   const ca1 = await requestApproval(apiKey, { agent_id: 'a', action_summary: 'credit test 1', ttl_seconds: 600 });
@@ -323,6 +338,7 @@ async function main() {
 
   // ── Section 12: Idempotency gap ───────────────────────────────────────────
   console.log(c.section('Idempotency'));
+  apiKey = await freshSetup();
   const idempA = await requestApproval(apiKey, { agent_id: 'agent-x', action_summary: 'dupe-test', ttl_seconds: 600 });
   const idempB = await requestApproval(apiKey, { agent_id: 'agent-x', action_summary: 'dupe-test', ttl_seconds: 600 });
   if (idempA.body?.approval_id === idempB.body?.approval_id) {
@@ -334,14 +350,17 @@ async function main() {
 
   // ── Section 13: Malformed approval_id paths ───────────────────────────────
   console.log(c.section('Malformed approval_id handling'));
+  apiKey = await freshSetup();
   const badIds = [
-    '..',
+    // '..' alone is client-normalized to parent dir by fetch/curl — never reaches the handler.
+    // Test only ids that actually transit to the server.
     '../../etc/passwd',
     '%00',
     'a'.repeat(2000),
     'with spaces',
     'with/slash',
     "with'quote",
+    'has$pecial!chars',
   ];
   for (const bad of badIds) {
     const r1 = await checkApproval(apiKey, bad);
