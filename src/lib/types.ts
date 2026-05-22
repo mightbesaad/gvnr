@@ -24,6 +24,10 @@ export interface RateEnvelopeRecord {
 
 import type { AccountState } from './account-do';
 
+export interface AccountConfigRecord {
+  notification_email?: string;
+}
+
 export interface Env {
   BUDGET_KV: KVNamespace;
   ACCOUNT: DurableObjectNamespace<AccountState>;
@@ -32,4 +36,5 @@ export interface Env {
   X402_NETWORK: string;      // e.g. "eip155:8453" (Base) or "eip155:84532" (Base Sepolia)
   ADMIN_SECRET: string;      // secret header value for admin endpoints
   BASE_RPC_FALLBACK_URL?: string; // optional fallback RPC if the primary chain RPC fails
+  RESEND_API_KEY?: string;   // optional — outbound approval email via Resend
 }

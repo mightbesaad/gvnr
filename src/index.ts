@@ -7,6 +7,8 @@ import envelopeRoutes from './routes/envelope';
 import budgetRoutes from './routes/budget';
 import rateRoutes from './routes/rate';
 import idempotencyRoutes from './routes/idempotency';
+import approvalRoutes from './routes/approval';
+import approveRoutes from './routes/approve';
 import payRoutes from './routes/pay';
 import tosRoutes from './routes/tos';
 import { getAccount } from './lib/kv';
@@ -109,6 +111,20 @@ app.get('/.well-known/agent-skills/index.json', (c) => {
         url: 'https://gvnr.dev/mcp',
         sha256: 'edfe3444996affb1e29d86d7ac7768d33d15251e7c58c505dc1469738999a589',
       },
+      {
+        name: 'request_approval',
+        type: 'mcp',
+        description: 'Request human approval for an agent action. Returns immediately with an approval_id and approval_url; the human approves or denies on a web page, and the agent polls check_approval to learn the decision.',
+        url: 'https://gvnr.dev/mcp',
+        sha256: '0b8fee267e6ff967f5300545caf00309549819cdfec86d8a3f8d13e9904bc1e7',
+      },
+      {
+        name: 'check_approval',
+        type: 'mcp',
+        description: 'Poll the status of a pending approval. Returns decision: pending, approved, denied, or timeout once the deadline passes.',
+        url: 'https://gvnr.dev/mcp',
+        sha256: '9d4adacf9c2c4f1d96a5f3e0aa8a72e1d75b9c529a694703d87d40caa6a41ff5',
+      },
     ],
   });
 });
@@ -128,9 +144,9 @@ app.get('/sitemap.xml', (c) => {
 app.get('/.well-known/mcp.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
-    name: 'Budget Governor',
-    description: 'Substrate primitives for AI agents — spend caps, rate limits, idempotency, and post-call reconciliation. One MCP endpoint, one credit pool.',
-    version: '1.3.0',
+    name: 'Gvnr',
+    description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, one credit pool.',
+    version: '1.4.0',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
     authentication: {
@@ -173,6 +189,16 @@ app.get('/.well-known/mcp.json', (c) => {
         description: 'Dedupe retries on a caller-supplied key; returns is_first_call=true on first call, false on replays within TTL',
         annotations: { title: 'Reserve an idempotency key', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       },
+      {
+        name: 'request_approval',
+        description: 'Request human approval for an agent action; returns approval_id + approval_url, agent polls check_approval for the decision',
+        annotations: { title: 'Request human approval for an action', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      },
+      {
+        name: 'check_approval',
+        description: 'Poll the status of a pending approval (pending / approved / denied / timeout)',
+        annotations: { title: 'Check the status of an approval request', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
     ],
   });
 });
@@ -181,7 +207,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Budget Governor', version: '1.3.0', description: 'Substrate primitives for AI agents — spend caps, rate limits, idempotency, and post-call reconciliation.' },
+    info: { title: 'Gvnr', version: '1.4.0', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
@@ -273,6 +299,55 @@ app.get('/openapi.json', (c) => {
           responses: { '200': { description: 'Returns is_first_call (bool), ttl_remaining_seconds (int)' } },
         },
       },
+      '/v1/account/notification-email': {
+        get: {
+          summary: 'Get the configured notification email (used by request_approval)',
+          security: [{ bearerAuth: [] }],
+          responses: { '200': { description: 'Returns notification_email (string|null)' } },
+        },
+        post: {
+          summary: 'Set the email Gvnr notifies when request_approval fires',
+          security: [{ bearerAuth: [] }],
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { email: { type: 'string', format: 'email' } }, required: ['email'] } } } },
+          responses: { '200': { description: 'Returns ok and the stored notification_email' } },
+        },
+        delete: {
+          summary: 'Clear the configured notification email (right-to-erasure)',
+          security: [{ bearerAuth: [] }],
+          responses: { '200': { description: 'Returns ok' } },
+        },
+      },
+      '/v1/approval/request': {
+        post: {
+          summary: 'Create an approval request — returns approval_id, approval_url, expires_at',
+          security: [{ bearerAuth: [] }],
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string', maxLength: 128 }, action_summary: { type: 'string', maxLength: 280 }, ttl_seconds: { type: 'integer', minimum: 30, maximum: 604800 }, channels: { type: 'array', items: { type: 'string', enum: ['email', 'telegram', 'sms'] } } }, required: ['agent_id', 'action_summary'] } } } },
+          responses: { '200': { description: 'Returns approval_id, approval_url, expires_at, notification status' } },
+        },
+      },
+      '/v1/approval/check/{approval_id}': {
+        get: {
+          summary: 'Poll the status of an approval request',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'approval_id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'Returns decision (pending/approved/denied/timeout) and metadata' } },
+        },
+      },
+      '/approve/{approval_id}': {
+        get: {
+          summary: 'Human-facing approval page (mobile-first single-page UI)',
+          parameters: [{ name: 'approval_id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'HTML approval UI' } },
+        },
+      },
+      '/approve/{approval_id}/decide': {
+        post: {
+          summary: 'Submit an approval decision (form POST from the approval page)',
+          parameters: [{ name: 'approval_id', in: 'path', required: true, schema: { type: 'string' } }],
+          requestBody: { content: { 'application/x-www-form-urlencoded': { schema: { type: 'object', properties: { decision: { type: 'string', enum: ['approved', 'denied'] } }, required: ['decision'] } } } },
+          responses: { '200': { description: 'HTML confirmation page' } },
+        },
+      },
       '/v1/budget/envelope': {
         put: {
           summary: 'Create or update agent spend envelope',
@@ -329,10 +404,10 @@ app.get('/', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gvnr — pre-call governance for AI agents</title>
-  <meta name="description" content="Substrate primitives for AI agents — spend caps, rate limits, idempotency, post-call reconciliation. One MCP endpoint, one credit pool.">
+  <title>Gvnr — AI agent substrate</title>
+  <meta name="description" content="AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, one credit pool.">
   <meta property="og:title" content="Gvnr">
-  <meta property="og:description" content="Substrate primitives for AI agents — spend caps, rate limits, idempotency, post-call reconciliation. One MCP endpoint, one credit pool.">
+  <meta property="og:description" content="AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, one credit pool.">
   <meta property="og:url" content="https://gvnr.dev">
   <meta property="og:type" content="website">
   <meta name="robots" content="index, follow">
@@ -392,8 +467,8 @@ app.get('/', (c) => {
 <body>
   <div class="container">
     <h1>Gvnr</h1>
-    <p class="tagline">Substrate primitives for AI agents — spend, rate, dedup, reconcile.</p>
-    <p class="value-prop">One MCP endpoint, one credit pool. Compose <code style="font-family:monospace;color:#a78bfa">budget_clear → rate_check → idempotency_check → call LLM → reconcile</code> before every provider request — no infrastructure to deploy.</p>
+    <p class="tagline">AI agent substrate — caps, coordination, human override.</p>
+    <p class="value-prop">One MCP endpoint, one credit pool. Compose <code style="font-family:monospace;color:#a78bfa">budget_clear → rate_check → idempotency_check → call LLM → reconcile</code> before every provider request, or fall back to <code style="font-family:monospace;color:#a78bfa">request_approval</code> when an agent needs a human in the loop.</p>
 
     <div class="header-row">
       <div class="status">
@@ -431,7 +506,7 @@ app.get('/', (c) => {
 
     <section id="tools">
       <h2>MCP Tools</h2>
-      <p style="font-size:0.82rem;color:#888;margin-bottom:14px">Jump to: <a href="#spend" style="color:#a78bfa">#spend</a> · <a href="#rate-limits" style="color:#a78bfa">#rate-limits</a> · <a href="#reconcile" style="color:#a78bfa">#reconcile</a> · <a href="#idempotency" style="color:#a78bfa">#idempotency</a> · <a href="#pricing" style="color:#a78bfa">#pricing</a></p>
+      <p style="font-size:0.82rem;color:#888;margin-bottom:14px">Jump to: <a href="#spend" style="color:#a78bfa">#spend</a> · <a href="#rate-limits" style="color:#a78bfa">#rate-limits</a> · <a href="#reconcile" style="color:#a78bfa">#reconcile</a> · <a href="#idempotency" style="color:#a78bfa">#idempotency</a> · <a href="#approvals" style="color:#a78bfa">#approvals</a> · <a href="#pricing" style="color:#a78bfa">#pricing</a></p>
 
       <h3 id="spend" style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#777;margin:18px 0 10px">Spend cap</h3>
       <div class="tools">
@@ -474,6 +549,18 @@ app.get('/', (c) => {
         <div class="tool">
           <div class="tool-name">idempotency_check(key, ttl_seconds?)</div>
           <div class="tool-desc">Dedupe retries on a caller-supplied key. Returns is_first_call=true the first time, false on replays within TTL.</div>
+        </div>
+      </div>
+
+      <h3 id="approvals" style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#777;margin:18px 0 10px">Approval bridge <span style="font-size:0.65rem;color:#a78bfa;background:#1a1a2e;border:1px solid #2a2a4a;padding:1px 6px;border-radius:4px;margin-left:4px;letter-spacing:0.04em">NEW</span></h3>
+      <div class="tools">
+        <div class="tool">
+          <div class="tool-name">request_approval(agent_id, action_summary, ttl_seconds?, channels?)</div>
+          <div class="tool-desc">Pause for a human in the loop. Returns approval_id + a mobile-friendly approval URL; the human taps approve/deny. Notifies via email today (Telegram + SMS forward-compat).</div>
+        </div>
+        <div class="tool">
+          <div class="tool-name">check_approval(approval_id)</div>
+          <div class="tool-desc">Poll the decision: pending / approved / denied / timeout. Compose with budget_clear: denial → request_approval → resume.</div>
         </div>
       </div>
     </section>
@@ -529,7 +616,25 @@ curl -X POST \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"agent_id":"my-agent","actual_input_tokens":1800,"actual_output_tokens":2400}' \\
-  https://gvnr.dev/v1/budget/reconcile</pre>
+  https://gvnr.dev/v1/budget/reconcile
+
+# 8. (optional) Human-in-the-loop — set notification email, then request approval
+curl -X POST \\
+  -H "Authorization: Bearer bg_YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"email":"you@example.com"}' \\
+  https://gvnr.dev/v1/account/notification-email
+
+curl -X POST \\
+  -H "Authorization: Bearer bg_YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"agent_id":"my-agent","action_summary":"Spend $42 on Opus extraction over 30 docs","ttl_seconds":600}' \\
+  https://gvnr.dev/v1/approval/request
+# → { "approval_id": "...", "approval_url": "https://gvnr.dev/approve/...", "expires_at": ... }
+
+curl -H "Authorization: Bearer bg_YOUR_KEY" \\
+  https://gvnr.dev/v1/approval/check/APPROVAL_ID
+# → { "decision": "pending" | "approved" | "denied" | "timeout", ... }</pre>
     </section>
 
     <section id="pricing">
@@ -677,6 +782,8 @@ app.route('/v1/budget/envelope', envelopeRoutes);
 app.route('/v1/budget', budgetRoutes);
 app.route('/v1/rate', rateRoutes);
 app.route('/v1/idempotency', idempotencyRoutes);
+app.route('/v1/approval', approvalRoutes);
+app.route('/approve', approveRoutes);
 
 // MCP server — Streamable HTTP transport, stateless, all verbs
 app.all('/mcp', mcpHandler);
@@ -687,7 +794,7 @@ app.notFound((c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Not Found — Budget Governor</title>
+  <title>Not Found — Gvnr</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0a0a0a;color:#e5e5e5;padding:48px 24px;min-height:100vh}

@@ -6,6 +6,14 @@ import type { Env } from '../lib/types';
 import { getAccount } from '../lib/kv';
 import { nextDailyReset } from '../lib/models';
 import { checkIdempotency, DEFAULT_TTL_SECONDS, MAX_TTL_SECONDS } from './idempotency';
+import { requestApproval, checkApproval } from './approval';
+import {
+  DEFAULT_APPROVAL_TTL_SECONDS,
+  MAX_APPROVAL_TTL_SECONDS,
+  MIN_APPROVAL_TTL_SECONDS,
+  MAX_ACTION_SUMMARY_CHARS,
+  MAX_AGENT_ID_CHARS,
+} from '../lib/approval';
 
 export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Response> {
   const apiKey =
@@ -24,7 +32,9 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   const accountId = account.account_id;
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
 
-  const server = new McpServer({ name: 'budget-governor', version: '1.3.0' });
+  const server = new McpServer({ name: 'gvnr', version: '1.4.0' });
+
+  const origin = new URL(c.req.url).origin;
 
   server.registerTool(
     'budget_clear',
@@ -186,6 +196,51 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
     async ({ key, ttl_seconds }) => {
       const result = await checkIdempotency(c.env.BUDGET_KV, accountId, key, ttl_seconds ?? DEFAULT_TTL_SECONDS);
       return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
+    },
+  );
+
+  server.registerTool(
+    'request_approval',
+    {
+      description: 'Request human approval for an agent action. Returns immediately with an approval_id and approval_url; the human approves or denies on a web page, and the agent polls check_approval to learn the decision. Notifies the account holder via the configured channel (email today; telegram/sms forward-compat).',
+      inputSchema: {
+        agent_id: z.string().min(1).max(MAX_AGENT_ID_CHARS).describe('Agent identifier requesting approval'),
+        action_summary: z.string().min(1).max(MAX_ACTION_SUMMARY_CHARS).describe('Human-readable description of the action awaiting approval (≤280 chars)'),
+        ttl_seconds: z.number().int().finite().min(MIN_APPROVAL_TTL_SECONDS).max(MAX_APPROVAL_TTL_SECONDS).optional().describe(`Time the approver has to decide (default ${DEFAULT_APPROVAL_TTL_SECONDS}s, max 7 days)`),
+        channels: z.array(z.enum(['email', 'telegram', 'sms'])).optional().describe('Notification channels (default ["email"]; telegram/sms accepted for forward-compat but not yet delivered)'),
+      },
+      annotations: {
+        title: 'Request human approval for an action',
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    async ({ agent_id, action_summary, ttl_seconds, channels }) => {
+      const result = await requestApproval(c.env, accountId, origin, { agent_id, action_summary, ttl_seconds, channels });
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result.body) }] };
+    },
+  );
+
+  server.registerTool(
+    'check_approval',
+    {
+      description: 'Poll the status of a pending approval. Returns decision: "pending" while the human has not decided, "approved" or "denied" once they have, or "timeout" if expires_at has passed without a decision.',
+      inputSchema: {
+        approval_id: z.string().min(1).max(64).describe('approval_id returned by request_approval'),
+      },
+      annotations: {
+        title: 'Check the status of an approval request',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ approval_id }) => {
+      const result = await checkApproval(c.env, accountId, approval_id);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result.body) }] };
     },
   );
 

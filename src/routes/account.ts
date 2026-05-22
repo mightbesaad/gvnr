@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { Env } from '../lib/types';
+import type { AccountConfigRecord, Env } from '../lib/types';
 import { hashApiKey } from '../lib/kv';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
 import { PACKS, type PackName } from '../lib/x402';
@@ -7,6 +7,17 @@ import { PACKS, type PackName } from '../lib/x402';
 type Variables = AuthVariables;
 
 const account = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_EMAIL_CHARS = 254;
+
+function accountConfigKey(accountId: string): string {
+  return `account_config:${accountId}`;
+}
+
+export async function getAccountConfig(kv: KVNamespace, accountId: string): Promise<AccountConfigRecord | null> {
+  return kv.get<AccountConfigRecord>(accountConfigKey(accountId), 'json');
+}
 
 // POST /v1/account — provision a new account, returns api_key
 account.post('/', async (c) => {
@@ -31,6 +42,46 @@ account.get('/balance', authMiddleware, async (c) => {
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
   const balance = await stub.getBalance();
   return c.json({ balance_usd: balance });
+});
+
+// POST /v1/account/notification-email — set the address Gvnr emails when request_approval fires
+account.post('/notification-email', authMiddleware, async (c) => {
+  const accountId = c.get('accountId');
+  const body = await c.req.json<{ email?: unknown }>();
+
+  if (typeof body.email !== 'string' || !body.email || body.email.length > MAX_EMAIL_CHARS || !EMAIL_RE.test(body.email)) {
+    return c.json({ error: 'invalid_email', required: ['email (valid address, ≤254 chars)'] }, 400);
+  }
+
+  const existing = await getAccountConfig(c.env.BUDGET_KV, accountId);
+  const next: AccountConfigRecord = { ...existing, notification_email: body.email };
+  await c.env.BUDGET_KV.put(accountConfigKey(accountId), JSON.stringify(next));
+
+  return c.json({ ok: true, notification_email: body.email });
+});
+
+// GET /v1/account/notification-email — read current address (or null)
+account.get('/notification-email', authMiddleware, async (c) => {
+  const accountId = c.get('accountId');
+  const cfg = await getAccountConfig(c.env.BUDGET_KV, accountId);
+  return c.json({ notification_email: cfg?.notification_email ?? null });
+});
+
+// DELETE /v1/account/notification-email — clear the address (right-to-erasure)
+account.delete('/notification-email', authMiddleware, async (c) => {
+  const accountId = c.get('accountId');
+  const existing = await getAccountConfig(c.env.BUDGET_KV, accountId);
+  if (!existing) return c.json({ ok: true });
+
+  const next: AccountConfigRecord = { ...existing };
+  delete next.notification_email;
+
+  if (Object.keys(next).length === 0) {
+    await c.env.BUDGET_KV.delete(accountConfigKey(accountId));
+  } else {
+    await c.env.BUDGET_KV.put(accountConfigKey(accountId), JSON.stringify(next));
+  }
+  return c.json({ ok: true });
 });
 
 // POST /v1/account/topup/:pack — x402-gated credit top-up

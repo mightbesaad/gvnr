@@ -735,6 +735,293 @@ describe('Idempotency Service', () => {
   });
 });
 
+// ── Account notification email ───────────────────────────────────────────────
+
+describe('Account notification email', () => {
+  it('rejects invalid email', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/notification-email', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'not-an-email' }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('invalid_email');
+  });
+
+  it('stores valid email and reads it back', async () => {
+    const { apiKey } = await provisionAccount();
+    const set = await SELF.fetch('http://localhost/v1/account/notification-email', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'human@example.com' }),
+    });
+    expect(set.status).toBe(200);
+
+    const get = await SELF.fetch('http://localhost/v1/account/notification-email', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect((await get.json<{ notification_email: string | null }>()).notification_email).toBe('human@example.com');
+  });
+
+  it('clears email on DELETE', async () => {
+    const { apiKey } = await provisionAccount();
+    await SELF.fetch('http://localhost/v1/account/notification-email', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'human@example.com' }),
+    });
+    const del = await SELF.fetch('http://localhost/v1/account/notification-email', {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(del.status).toBe(200);
+    const get = await SELF.fetch('http://localhost/v1/account/notification-email', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect((await get.json<{ notification_email: string | null }>()).notification_email).toBeNull();
+  });
+});
+
+// ── Agent Approval Bridge ────────────────────────────────────────────────────
+
+describe('Agent Approval Bridge', () => {
+  async function setupAccount(): Promise<{ apiKey: string }> {
+    const { apiKey } = await provisionAccount();
+    await SELF.fetch('http://localhost/v1/account/notification-email', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'human@example.com' }),
+    });
+    return { apiKey };
+  }
+
+  async function requestApproval(apiKey: string, overrides: Record<string, unknown> = {}) {
+    return SELF.fetch('http://localhost/v1/approval/request', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent_id: 'agent-1',
+        action_summary: 'Spend $42 on Opus extraction over 30 docs',
+        ttl_seconds: 600,
+        ...overrides,
+      }),
+    });
+  }
+
+  it('returns 400 when notification_email is not set', async () => {
+    const { apiKey } = await provisionAccount(); // no email
+    const res = await requestApproval(apiKey);
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('notification_email_unset');
+  });
+
+  it('creates an approval and returns id + url + expires_at', async () => {
+    const { apiKey } = await setupAccount();
+    const res = await requestApproval(apiKey);
+    expect(res.status).toBe(200);
+    const body = await res.json<{ approval_id: string; approval_url: string; expires_at: number; notification: { email: string } }>();
+    expect(body.approval_id).toMatch(/^[A-Za-z0-9_-]{20,}$/);
+    expect(body.approval_url).toContain('/approve/' + body.approval_id);
+    expect(body.expires_at).toBeGreaterThan(Date.now());
+    // Resend key not configured in test env — dispatch is skipped
+    expect(body.notification.email).toBe('skipped_no_key');
+  });
+
+  it('rejects invalid params', async () => {
+    const { apiKey } = await setupAccount();
+
+    const emptyAgent = await requestApproval(apiKey, { agent_id: '' });
+    expect(emptyAgent.status).toBe(400);
+
+    const emptySummary = await requestApproval(apiKey, { action_summary: '' });
+    expect(emptySummary.status).toBe(400);
+
+    const hugeSummary = await requestApproval(apiKey, { action_summary: 'x'.repeat(281) });
+    expect(hugeSummary.status).toBe(400);
+
+    const badTtl = await requestApproval(apiKey, { ttl_seconds: 999_999_999 });
+    expect(badTtl.status).toBe(400);
+
+    const badChannel = await requestApproval(apiKey, { channels: ['carrier-pigeon'] });
+    expect(badChannel.status).toBe(400);
+  });
+
+  it('check returns pending immediately after request', async () => {
+    const { apiKey } = await setupAccount();
+    const req = await requestApproval(apiKey);
+    const { approval_id } = await req.json<{ approval_id: string }>();
+    const check = await SELF.fetch(`http://localhost/v1/approval/check/${approval_id}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(check.status).toBe(200);
+    const body = await check.json<{ decision: string; agent_id: string }>();
+    expect(body.decision).toBe('pending');
+    expect(body.agent_id).toBe('agent-1');
+  });
+
+  it('check returns 404 for unknown approval_id', async () => {
+    const { apiKey } = await setupAccount();
+    const res = await SELF.fetch('http://localhost/v1/approval/check/nonexistent_id', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('check enforces account isolation — account B cannot poll account A approval', async () => {
+    const { apiKey: a } = await setupAccount();
+    const { apiKey: b } = await setupAccount();
+
+    const req = await requestApproval(a);
+    const { approval_id } = await req.json<{ approval_id: string }>();
+
+    const bCheck = await SELF.fetch(`http://localhost/v1/approval/check/${approval_id}`, {
+      headers: { Authorization: `Bearer ${b}` },
+    });
+    expect(bCheck.status).toBe(404);
+  });
+
+  it('GET /approve/:id renders pending page when undecided', async () => {
+    const { apiKey } = await setupAccount();
+    const req = await requestApproval(apiKey);
+    const { approval_id } = await req.json<{ approval_id: string }>();
+
+    const page = await SELF.fetch(`http://localhost/approve/${approval_id}`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get('content-type')).toContain('text/html');
+    const html = await page.text();
+    expect(html).toContain('Approve agent action?');
+    expect(html).toContain('agent-1');
+    expect(html).toContain('Opus extraction');
+  });
+
+  it('POST /approve/:id/decide approves and check reflects approval', async () => {
+    const { apiKey } = await setupAccount();
+    const req = await requestApproval(apiKey);
+    const { approval_id } = await req.json<{ approval_id: string }>();
+
+    const decide = await SELF.fetch(`http://localhost/approve/${approval_id}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'decision=approved',
+    });
+    expect(decide.status).toBe(200);
+    const html = await decide.text();
+    expect(html).toContain('Approved');
+
+    const check = await SELF.fetch(`http://localhost/v1/approval/check/${approval_id}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    const body = await check.json<{ decision: string; decided_at?: number }>();
+    expect(body.decision).toBe('approved');
+    expect(body.decided_at).toBeGreaterThan(0);
+  });
+
+  it('POST /approve/:id/decide denies and check reflects denial', async () => {
+    const { apiKey } = await setupAccount();
+    const req = await requestApproval(apiKey);
+    const { approval_id } = await req.json<{ approval_id: string }>();
+
+    await SELF.fetch(`http://localhost/approve/${approval_id}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'decision=denied',
+    });
+
+    const check = await SELF.fetch(`http://localhost/v1/approval/check/${approval_id}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    const body = await check.json<{ decision: string }>();
+    expect(body.decision).toBe('denied');
+  });
+
+  it('second decide on already-decided approval returns terminal page and does not change state', async () => {
+    const { apiKey } = await setupAccount();
+    const req = await requestApproval(apiKey);
+    const { approval_id } = await req.json<{ approval_id: string }>();
+
+    await SELF.fetch(`http://localhost/approve/${approval_id}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'decision=approved',
+    });
+
+    const second = await SELF.fetch(`http://localhost/approve/${approval_id}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'decision=denied',
+    });
+    expect(second.status).toBe(200);
+    expect(await second.text()).toContain('Approved'); // still approved, not denied
+
+    const check = await SELF.fetch(`http://localhost/v1/approval/check/${approval_id}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect((await check.json<{ decision: string }>()).decision).toBe('approved');
+  });
+
+  it('timeout: short TTL elapses and check returns timeout', async () => {
+    const { apiKey } = await setupAccount();
+    const req = await requestApproval(apiKey, { ttl_seconds: 1 });
+    const { approval_id } = await req.json<{ approval_id: string }>();
+
+    await new Promise((r) => setTimeout(r, 1100));
+
+    const check = await SELF.fetch(`http://localhost/v1/approval/check/${approval_id}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(check.status).toBe(200);
+    const body = await check.json<{ decision: string }>();
+    expect(body.decision).toBe('timeout');
+  });
+
+  it('GET /approve/:id for unknown id returns 404 page', async () => {
+    const res = await SELF.fetch('http://localhost/approve/nonexistent_id');
+    expect(res.status).toBe(404);
+    expect(await res.text()).toContain('Approval not found');
+  });
+});
+
+// ── Brand surface: MCP card and homepage reflect Slot 5 rename ───────────────
+
+describe('Slot 5 brand surface', () => {
+  it('mcp.json card name is "Gvnr" and version 1.4.0', async () => {
+    const res = await SELF.fetch('http://localhost/.well-known/mcp.json');
+    expect(res.status).toBe(200);
+    const body = await res.json<{ name: string; version: string; tools: { name: string }[] }>();
+    expect(body.name).toBe('Gvnr');
+    expect(body.version).toBe('1.4.0');
+    const toolNames = body.tools.map((t) => t.name);
+    expect(toolNames).toContain('request_approval');
+    expect(toolNames).toContain('check_approval');
+  });
+
+  it('openapi.json title is "Gvnr" and version 1.4.0', async () => {
+    const res = await SELF.fetch('http://localhost/openapi.json');
+    expect(res.status).toBe(200);
+    const body = await res.json<{ info: { title: string; version: string }; paths: Record<string, unknown> }>();
+    expect(body.info.title).toBe('Gvnr');
+    expect(body.info.version).toBe('1.4.0');
+    expect(body.paths['/v1/approval/request']).toBeDefined();
+    expect(body.paths['/v1/approval/check/{approval_id}']).toBeDefined();
+  });
+
+  it('agent-skills index lists request_approval and check_approval', async () => {
+    const res = await SELF.fetch('http://localhost/.well-known/agent-skills/index.json');
+    const body = await res.json<{ skills: { name: string }[] }>();
+    const names = body.skills.map((s) => s.name);
+    expect(names).toContain('request_approval');
+    expect(names).toContain('check_approval');
+  });
+
+  it('homepage tagline mentions human override', async () => {
+    const res = await SELF.fetch('http://localhost/');
+    const html = await res.text();
+    expect(html).toContain('human override');
+    expect(html).toContain('request_approval');
+  });
+});
+
 // ── Payment UI ───────────────────────────────────────────────────────────────
 
 describe('GET /v1/packs/:pack/info', () => {
