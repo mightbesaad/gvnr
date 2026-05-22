@@ -21,6 +21,7 @@ const approval = new Hono<{ Bindings: Env; Variables: Variables }>();
 approval.use('/*', authMiddleware);
 
 const VALID_CHANNELS = new Set(['email', 'telegram', 'sms']);
+const IMPLEMENTED_CHANNELS_V1 = new Set(['email']);
 
 export interface RequestApprovalResult {
   approval_id: string;
@@ -69,6 +70,18 @@ export async function requestApproval(
   const channels = params.channels ?? ['email'];
   if (!Array.isArray(channels) || channels.length === 0 || channels.some((c) => !VALID_CHANNELS.has(c))) {
     return { status: 400, body: { error: 'invalid_channels', valid_channels: Array.from(VALID_CHANNELS) } };
+  }
+  // V1 ships email only. Reject calls that ask for unimplemented channels so a caller
+  // sees a clear 400 instead of a silently orphaned approval that no human is notified about.
+  if (channels.some((c) => !IMPLEMENTED_CHANNELS_V1.has(c))) {
+    return {
+      status: 400,
+      body: {
+        error: 'channel_not_implemented',
+        valid_channels: Array.from(IMPLEMENTED_CHANNELS_V1),
+        hint: 'telegram and sms are reserved in the schema for forward-compat but not yet delivered',
+      },
+    };
   }
 
   const cfg = await getAccountConfig(env.BUDGET_KV, accountId);

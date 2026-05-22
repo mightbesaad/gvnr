@@ -4,7 +4,8 @@ import { decideApproval, readApproval, type ApprovalRecord } from '../lib/approv
 
 const approve = new Hono<{ Bindings: Env }>();
 
-const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'";
+// No inline JS on /approve/* pages — buttons submit plain HTML forms.
+const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; connect-src 'self'; frame-ancestors 'none'";
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -133,6 +134,7 @@ approve.post('/:id/decide', async (c) => {
 </div>`), 400);
   }
 
+  // Best-effort attribution only — 48-bit truncated SHA-256, not a security identifier.
   const responder = c.req.header('CF-Connecting-IP')
     ? `ip:${await hashShort(c.req.header('CF-Connecting-IP')!)}`
     : 'anonymous';

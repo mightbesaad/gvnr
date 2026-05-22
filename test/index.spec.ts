@@ -845,6 +845,14 @@ describe('Agent Approval Bridge', () => {
 
     const badChannel = await requestApproval(apiKey, { channels: ['carrier-pigeon'] });
     expect(badChannel.status).toBe(400);
+
+    // V1 rejects unimplemented channels so callers don't silently orphan an approval
+    const telegramOnly = await requestApproval(apiKey, { channels: ['telegram'] });
+    expect(telegramOnly.status).toBe(400);
+    expect((await telegramOnly.json<{ error: string }>()).error).toBe('channel_not_implemented');
+
+    const mixedChannels = await requestApproval(apiKey, { channels: ['email', 'sms'] });
+    expect(mixedChannels.status).toBe(400);
   });
 
   it('check returns pending immediately after request', async () => {

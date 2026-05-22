@@ -202,7 +202,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'request_approval',
     {
-      description: 'Request human approval for an agent action. Returns immediately with an approval_id and approval_url; the human approves or denies on a web page, and the agent polls check_approval to learn the decision. Notifies the account holder via the configured channel (email today; telegram/sms forward-compat).',
+      description: 'Request human approval for an agent action. Returns immediately with an approval_id and approval_url; the human approves or denies on a web page, and the agent polls check_approval to learn the decision. Notifies the account holder via the configured channel (V1: email only; telegram/sms accepted in schema but rejected with channel_not_implemented). NOT idempotent — retries create duplicate approvals; gate with idempotency_check if needed.',
       inputSchema: {
         agent_id: z.string().min(1).max(MAX_AGENT_ID_CHARS).describe('Agent identifier requesting approval'),
         action_summary: z.string().min(1).max(MAX_ACTION_SUMMARY_CHARS).describe('Human-readable description of the action awaiting approval (≤280 chars)'),
