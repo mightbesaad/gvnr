@@ -32,6 +32,7 @@ export interface Env {
   BUDGET_KV: KVNamespace;
   ACCOUNT: DurableObjectNamespace<AccountState>;
   ACCOUNT_RATE_LIMITER: RateLimit;
+  APPROVAL_RATE_LIMITER: RateLimit;
   PAYTO_ADDRESS: string;     // USDC receiving address (0x...)
   X402_NETWORK: string;      // e.g. "eip155:8453" (Base) or "eip155:84532" (Base Sepolia)
   ADMIN_SECRET: string;      // secret header value for admin endpoints

@@ -147,6 +147,15 @@ export async function checkApproval(
 
 approval.post('/request', async (c) => {
   const accountId = c.get('accountId');
+
+  // Per-account rate limit — caps an attacker (or buggy agent) at 30 approval creations / minute.
+  // Each approval costs a KV write + (when configured) an email send, so capacity is shared
+  // pool we don't want one account to drain. 30/min is generous for legitimate use.
+  const { success } = await c.env.APPROVAL_RATE_LIMITER.limit({ key: `req:${accountId}` });
+  if (!success) {
+    return c.json({ error: 'rate_limited', retry_after: 'next_minute', limit: '30 request_approval calls per minute' }, 429);
+  }
+
   const body = await c.req.json<{
     agent_id?: string;
     action_summary?: string;

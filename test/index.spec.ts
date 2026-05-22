@@ -988,6 +988,61 @@ describe('Agent Approval Bridge', () => {
     expect(res.status).toBe(404);
     expect(await res.text()).toContain('Approval not found');
   });
+
+  it('rejects oversized approval_id with 404 (no 500 from KV key-length)', async () => {
+    const { apiKey } = await setupAccount();
+    const tooLong = 'a'.repeat(2000);
+
+    const check = await SELF.fetch(`http://localhost/v1/approval/check/${tooLong}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(check.status).toBe(404);
+
+    const page = await SELF.fetch(`http://localhost/approve/${tooLong}`);
+    expect(page.status).toBe(404);
+  });
+
+  it('rejects approval_id with non-base64url chars as 404', async () => {
+    const { apiKey } = await setupAccount();
+    const badShape = 'has spaces and $ymbols!';
+    const check = await SELF.fetch(`http://localhost/v1/approval/check/${encodeURIComponent(badShape)}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(check.status).toBe(404);
+  });
+
+  it('approval pages set Referrer-Policy: no-referrer so the URL is not leaked to footer links', async () => {
+    const { apiKey } = await setupAccount();
+    const req = await requestApproval(apiKey);
+    const { approval_id } = await req.json<{ approval_id: string }>();
+
+    const page = await SELF.fetch(`http://localhost/approve/${approval_id}`);
+    expect(page.headers.get('referrer-policy')).toBe('no-referrer');
+
+    const decide = await SELF.fetch(`http://localhost/approve/${approval_id}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'decision=approved',
+    });
+    expect(decide.headers.get('referrer-policy')).toBe('no-referrer');
+  });
+
+  it('XSS in action_summary is HTML-escaped on the approval page (no raw <script> or <img>)', async () => {
+    const { apiKey } = await setupAccount();
+    const xss = '<script>alert(1)</script><img src=x onerror=alert(2)>';
+    const req = await requestApproval(apiKey, { action_summary: xss });
+    const { approval_id } = await req.json<{ approval_id: string }>();
+    const page = await SELF.fetch(`http://localhost/approve/${approval_id}`);
+    const html = await page.text();
+
+    // No unescaped tags reach the rendered document
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).not.toMatch(/<img\s+src=x/);
+
+    // Brackets are entity-encoded
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).toContain('&lt;img');
+  });
 });
 
 // ── Brand surface: MCP card and homepage reflect Slot 5 rename ───────────────

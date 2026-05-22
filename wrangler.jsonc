@@ -25,12 +25,20 @@
 		"BASE_RPC_FALLBACK_URL": "https://base.publicnode.com",
 	},
 	"unsafe": {
-		"bindings": [{
-			"name": "ACCOUNT_RATE_LIMITER",
-			"type": "ratelimit",
-			"namespace_id": "1001",
-			"simple": { "limit": 10, "period": 3600 },
-		}],
+		"bindings": [
+			{
+				"name": "ACCOUNT_RATE_LIMITER",
+				"type": "ratelimit",
+				"namespace_id": "1001",
+				"simple": { "limit": 10, "period": 3600 },
+			},
+			{
+				"name": "APPROVAL_RATE_LIMITER",
+				"type": "ratelimit",
+				"namespace_id": "1002",
+				"simple": { "limit": 30, "period": 60 },
+			},
+		],
 	},
 	"routes": [
 		{ "pattern": "gvnr.dev", "custom_domain": true },

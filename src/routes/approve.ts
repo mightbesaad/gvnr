@@ -101,6 +101,8 @@ approve.get('/:id', async (c) => {
   c.header('Content-Security-Policy', PAGE_CSP);
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('Cache-Control', 'no-store');
+  // The approval URL is a bearer credential — never leak it via Referer to any link the page renders.
+  c.header('Referrer-Policy', 'no-referrer');
   const id = c.req.param('id');
   const record = await readApproval(c.env.BUDGET_KV, id);
   if (!record) return c.html(renderNotFound(), 404);
@@ -112,6 +114,7 @@ approve.post('/:id/decide', async (c) => {
   c.header('Content-Security-Policy', PAGE_CSP);
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('Cache-Control', 'no-store');
+  c.header('Referrer-Policy', 'no-referrer');
   const id = c.req.param('id');
 
   let decision: string | undefined;

@@ -17,6 +17,15 @@ export const MAX_APPROVAL_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days — covers a
 export const MIN_APPROVAL_TTL_SECONDS = 1;                // anything shorter is pointless; permitted for short polling tests
 export const MAX_ACTION_SUMMARY_CHARS = 280;
 export const MAX_AGENT_ID_CHARS = 128;
+// Our tokens are 22 chars (16 bytes base64url). Allow up to 64 for forward-compat (longer tokens
+// or signed envelopes). Anything beyond that is invalid — and crucially exceeds the KV 512-byte
+// key limit, which would otherwise produce a 500 instead of a clean 404.
+export const MAX_APPROVAL_ID_CHARS = 64;
+const APPROVAL_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+export function isValidApprovalIdShape(id: string): boolean {
+  return typeof id === 'string' && id.length > 0 && id.length <= MAX_APPROVAL_ID_CHARS && APPROVAL_ID_RE.test(id);
+}
 
 // Keep the KV record around past the human deadline so check_approval can still
 // return decision="timeout" rather than 404. KV minimum TTL is 60s.
@@ -82,6 +91,7 @@ export async function readApproval(
   kv: KVNamespace,
   approvalId: string,
 ): Promise<ApprovalRecord | null> {
+  if (!isValidApprovalIdShape(approvalId)) return null;
   const record = await kv.get<ApprovalRecord>(approvalKey(approvalId), 'json');
   if (!record) return null;
 
@@ -105,6 +115,7 @@ export async function decideApproval(
   decision: 'approved' | 'denied',
   responder?: string,
 ): Promise<DecideResult> {
+  if (!isValidApprovalIdShape(approvalId)) return { ok: false, reason: 'not_found' };
   const existing = await kv.get<ApprovalRecord>(approvalKey(approvalId), 'json');
   if (!existing) return { ok: false, reason: 'not_found' };
 
