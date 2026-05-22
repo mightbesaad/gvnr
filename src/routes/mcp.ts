@@ -35,6 +35,13 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
         model: z.string().describe('Model being called (e.g. claude-sonnet-4-6, gpt-4o)'),
         estimated_tokens: z.number().int().finite().positive().describe('Estimated output tokens for the request'),
       },
+      annotations: {
+        title: 'Clear budget for a planned LLM call',
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
     async ({ agent_id, model, estimated_tokens }) => {
       const result = await stub.runClearance(agent_id, model, estimated_tokens);
@@ -50,6 +57,13 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
         agent_id: z.string().max(128).describe('The agent identifier'),
         limit_usd: z.number().finite().positive().max(1_000_000).describe('Spend limit in USD'),
         window: z.enum(['daily', 'session']).default('daily').describe('Reset window: daily (UTC midnight) or session (never resets)'),
+      },
+      annotations: {
+        title: 'Set spend envelope for an agent',
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     },
     async ({ agent_id, limit_usd, window }) => {
@@ -69,6 +83,13 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
     {
       description: 'Get the current credit balance for this account.',
       inputSchema: {},
+      annotations: {
+        title: 'Get account credit balance',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async () => {
       const balance = await stub.getBalance();
@@ -84,6 +105,13 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
         agent_id: z.string().max(128).describe('The agent identifier'),
         actual_input_tokens: z.number().int().finite().nonnegative().describe('Actual input tokens reported by the LLM provider'),
         actual_output_tokens: z.number().int().finite().nonnegative().describe('Actual output tokens reported by the LLM provider'),
+      },
+      annotations: {
+        title: 'Reconcile a clearance with actual usage',
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
       },
     },
     async ({ agent_id, actual_input_tokens, actual_output_tokens }) => {
@@ -102,6 +130,13 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
         model: z.string().max(128).describe('Model identifier, e.g. claude-sonnet-4-6, gpt-4o'),
         requests_per_minute: z.number().int().finite().positive().max(1_000_000).describe('Allowed requests per 60-second window'),
       },
+      annotations: {
+        title: 'Set rate envelope for (agent, provider, model)',
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     async ({ agent_id, provider, model, requests_per_minute }) => {
       await stub.setRateEnvelope(agent_id, provider, model, requests_per_minute);
@@ -118,6 +153,13 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
         provider: z.string().max(64).describe('Provider name, e.g. anthropic, openai'),
         model: z.string().max(128).describe('Model identifier, e.g. claude-sonnet-4-6'),
       },
+      annotations: {
+        title: 'Check rate limit (increments counter on allow)',
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
     async ({ agent_id, provider, model }) => {
       const result = await stub.checkRate(agent_id, provider, model);
@@ -132,6 +174,13 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
       inputSchema: {
         key: z.string().min(1).max(256).describe('Idempotency key — unique per logical operation'),
         ttl_seconds: z.number().int().finite().positive().max(MAX_TTL_SECONDS).optional().describe('Time-to-live in seconds (default 3600, max 30 days)'),
+      },
+      annotations: {
+        title: 'Reserve an idempotency key',
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
     },
     async ({ key, ttl_seconds }) => {

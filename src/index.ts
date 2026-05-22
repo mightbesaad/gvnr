@@ -138,13 +138,41 @@ app.get('/.well-known/mcp.json', (c) => {
       description: 'API key obtained from POST https://gvnr.dev/v1/account',
     },
     tools: [
-      { name: 'budget_clear', description: 'Check if an agent is authorized to spend tokens and deduct the estimated cost' },
-      { name: 'set_envelope', description: 'Create or update a spend envelope for an agent' },
-      { name: 'get_balance', description: 'Get current account credit balance in USD' },
-      { name: 'reconcile', description: 'Reconcile a prior budget_clear with actual usage; applies the drift to envelope and balance' },
-      { name: 'set_rate_envelope', description: 'Create or update a rate-limit envelope per (agent, provider, model)' },
-      { name: 'rate_check', description: 'Check whether an agent is allowed to make a call against the rate envelope; increments the counter on allow' },
-      { name: 'idempotency_check', description: 'Dedupe retries on a caller-supplied key; returns is_first_call=true on first call, false on replays within TTL' },
+      {
+        name: 'budget_clear',
+        description: 'Check if an agent is authorized to spend tokens and deduct the estimated cost',
+        annotations: { title: 'Clear budget for a planned LLM call', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      },
+      {
+        name: 'set_envelope',
+        description: 'Create or update a spend envelope for an agent',
+        annotations: { title: 'Set spend envelope for an agent', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      {
+        name: 'get_balance',
+        description: 'Get current account credit balance in USD',
+        annotations: { title: 'Get account credit balance', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      {
+        name: 'reconcile',
+        description: 'Reconcile a prior budget_clear with actual usage; applies the drift to envelope and balance',
+        annotations: { title: 'Reconcile a clearance with actual usage', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      },
+      {
+        name: 'set_rate_envelope',
+        description: 'Create or update a rate-limit envelope per (agent, provider, model)',
+        annotations: { title: 'Set rate envelope for (agent, provider, model)', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      {
+        name: 'rate_check',
+        description: 'Check whether an agent is allowed to make a call against the rate envelope; increments the counter on allow',
+        annotations: { title: 'Check rate limit (increments counter on allow)', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      },
+      {
+        name: 'idempotency_check',
+        description: 'Dedupe retries on a caller-supplied key; returns is_first_call=true on first call, false on replays within TTL',
+        annotations: { title: 'Reserve an idempotency key', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
     ],
   });
 });
