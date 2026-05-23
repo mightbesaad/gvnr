@@ -415,20 +415,21 @@ app.get('/', (c) => {
   <link rel="mcp" href="/.well-known/mcp.json">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 48px 24px; min-height: 100vh; }
-    .container { max-width: 640px; margin: 0 auto; }
-    h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 6px; }
-    .tagline { color: #888; font-size: 0.95rem; margin-bottom: 6px; }
-    .value-prop { color: #aaa; font-size: 0.85rem; margin-bottom: 24px; }
-    .header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 36px; flex-wrap: wrap; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 56px 28px 64px; min-height: 100vh; counter-reset: section; line-height: 1.55; }
+    .container { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 2.6rem; font-weight: 700; letter-spacing: -0.035em; margin-bottom: 12px; line-height: 1.05; background: linear-gradient(180deg,#fff,#bababa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .tagline { color: #cfcfcf; font-size: 1.15rem; margin-bottom: 14px; line-height: 1.4; font-weight: 400; }
+    .value-prop { color: #999; font-size: 0.92rem; margin-bottom: 24px; line-height: 1.6; }
+    .header-row { display: flex; align-items: center; justify-content: flex-start; gap: 14px; margin-bottom: 0; flex-wrap: wrap; }
     .status { display: flex; align-items: center; gap: 10px; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
-    .status-text { font-size: 0.9rem; color: #aaa; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; flex-shrink: 0; box-shadow: 0 0 8px rgba(34,197,94,0.5); }
+    .status-text { font-size: 0.88rem; color: #aaa; }
     .status-text strong { color: #e5e5e5; }
-    .cta-btn { display: inline-block; background: #4f46e5; color: #fff; text-decoration: none; padding: 8px 18px; border-radius: 6px; font-size: 0.85rem; font-weight: 500; white-space: nowrap; transition: opacity 0.15s; }
-    .cta-btn:hover { opacity: 0.85; }
-    section { margin-bottom: 36px; }
-    h2 { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #555; margin-bottom: 14px; }
+    .cta-btn { display: inline-block; background: #4f46e5; color: #fff; text-decoration: none; padding: 10px 22px; border-radius: 8px; font-size: 0.92rem; font-weight: 500; white-space: nowrap; transition: all 0.15s; box-shadow: 0 4px 14px rgba(79,70,229,0.25); }
+    .cta-btn:hover { opacity: 0.92; transform: translateY(-1px); box-shadow: 0 6px 18px rgba(79,70,229,0.35); }
+    section { margin-bottom: 56px; }
+    h2 { font-size: 1.35rem; font-weight: 600; letter-spacing: -0.015em; color: #e5e5e5; margin-bottom: 18px; display: flex; align-items: baseline; gap: 12px; }
+    h2::before { counter-increment: section; content: "[" counter(section, decimal-leading-zero) "]"; color: #555; font-family: "SF Mono","Fira Code",monospace; font-size: 0.78rem; font-weight: 500; letter-spacing: 0.04em; }
     .tools { display: flex; flex-direction: column; gap: 10px; }
     .tool { background: #111; border: 1px solid #1f1f1f; border-radius: 8px; padding: 14px 16px; }
     .tool-name { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.85rem; color: #a78bfa; margin-bottom: 4px; }
@@ -462,21 +463,119 @@ app.get('/', (c) => {
     .modal-done-btn { width: 100%; background: #4f46e5; color: #fff; border: none; border-radius: 8px; padding: 11px; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
     .modal-done-btn:hover { opacity: 0.85; }
     pre { overflow-x: auto; }
+
+    .docs-nav { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 10px 14px; background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 8px; margin-bottom: 28px; font-size: 0.78rem; align-items: center; }
+    .docs-nav a { color: #999; text-decoration: none; padding: 2px 0; transition: color 0.15s; }
+    .docs-nav a:hover { color: #a78bfa; }
+    .docs-nav .nav-dot { color: #2a2a2a; }
+    .docs-nav .nav-label { color: #555; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; margin-right: 4px; }
+
+    .compose { display: flex; gap: 12px; flex-wrap: wrap; }
+    .compose-col { flex: 1; min-width: 170px; background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 8px; padding: 14px; }
+    .compose-col-head { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #777; margin-bottom: 12px; }
+    .compose-step { background: #111; border: 1px solid #1f1f1f; border-radius: 6px; padding: 7px 10px; font-family: "SF Mono","Fira Code",monospace; font-size: 0.76rem; color: #a78bfa; }
+    .compose-step.muted { color: #aaa; font-family: -apple-system,sans-serif; font-style: italic; background: #0f0f0f; }
+    .compose-arrow { text-align: center; color: #444; font-size: 0.78rem; line-height: 1; margin: 4px 0; }
+    .compose-note { font-size: 0.76rem; color: #777; margin-top: 14px; line-height: 1.5; }
+
+    .approval-feature { display: flex; gap: 20px; align-items: flex-start; background: linear-gradient(180deg,#101019,#0c0c11); border: 1px solid #2a2a4a; border-radius: 10px; padding: 20px; margin-top: 4px; flex-wrap: wrap; }
+    .approval-text { flex: 1; min-width: 220px; }
+    .approval-text .ap-tool { font-family: "SF Mono","Fira Code",monospace; color: #a78bfa; font-size: 0.82rem; margin-bottom: 4px; }
+    .approval-text .ap-desc { font-size: 0.82rem; color: #999; line-height: 1.55; margin-bottom: 14px; }
+    .approval-text .ap-desc:last-child { margin-bottom: 0; }
+    .phone-mockup { width: 210px; flex-shrink: 0; background: #16161e; border: 1px solid #2a2a3a; border-radius: 22px; padding: 16px 14px 18px; box-shadow: 0 12px 28px rgba(0,0,0,0.5); }
+    .phone-bar { font-size: 0.62rem; color: #555; text-align: center; margin-bottom: 12px; letter-spacing: 0.04em; }
+    .phone-title { font-size: 0.88rem; font-weight: 600; color: #fff; margin-bottom: 10px; }
+    .phone-meta { font-size: 0.7rem; color: #888; line-height: 1.6; margin-bottom: 3px; }
+    .phone-meta strong { color: #ccc; font-weight: 500; }
+    .phone-expire { font-size: 0.68rem; color: #f59e0b; margin: 10px 0 14px; }
+    .phone-btn { display: block; width: 100%; text-align: center; padding: 8px 0; border-radius: 8px; font-size: 0.78rem; font-weight: 500; margin-bottom: 6px; }
+    .phone-btn.approve { background: #22c55e; color: #052e16; }
+    .phone-btn.deny { background: transparent; border: 1px solid #444; color: #999; margin-bottom: 0; }
+
+    .recipes { display: flex; flex-direction: column; gap: 12px; }
+    .recipe { background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 8px; padding: 14px 16px; }
+    .recipe-head { font-size: 0.82rem; color: #a78bfa; margin-bottom: 4px; font-weight: 500; font-family: "SF Mono","Fira Code",monospace; }
+    .recipe-sub { font-size: 0.78rem; color: #888; margin-bottom: 12px; line-height: 1.5; }
+    .recipe pre { margin: 0; font-size: 0.74rem; padding: 12px 14px; }
+
+    .hero { display: grid; grid-template-columns: 1fr; gap: 28px; margin-bottom: 28px; align-items: stretch; }
+    @media (min-width: 760px) { .hero { grid-template-columns: 1.05fr 1fr; gap: 36px; align-items: center; } }
+    .hero-text { display: flex; flex-direction: column; }
+    .hero-terminal { background: #0c0c0e; border: 1px solid #1d1d22; border-radius: 12px; padding: 16px 18px 18px; font-family: "SF Mono","Fira Code",monospace; font-size: 0.78rem; line-height: 1.6; box-shadow: 0 16px 40px rgba(0,0,0,0.45); overflow: hidden; }
+    .ht-bar { display: flex; gap: 6px; margin-bottom: 14px; align-items: center; padding-bottom: 10px; border-bottom: 1px solid #16161a; }
+    .ht-bar .ht-dot { width: 10px; height: 10px; border-radius: 50%; background: #2a2a2e; }
+    .ht-bar .ht-host { margin-left: auto; font-size: 0.7rem; color: #555; }
+    .ht-line { margin-bottom: 5px; word-break: break-all; }
+    .ht-line.gap { margin-top: 10px; }
+    .ht-prompt { color: #555; margin-right: 6px; }
+    .ht-cmd { color: #c4b5fd; }
+    .ht-arg { color: #888; }
+    .ht-ok { color: #4ade80; }
+    .ht-comment { color: #555; font-style: italic; }
+    .ht-amt { color: #fbbf24; }
+
+    .pack { background: #0f0f12; border: 1px solid #1f1f24; padding: 20px 22px; }
+    .pack:hover { border-color: #4f46e5; transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.3); }
+    .pack-price { font-size: 1.5rem; }
+    .tool { background: #0f0f12; border: 1px solid #1f1f24; padding: 16px 18px; transition: border-color 0.15s; }
+    .tool:hover { border-color: #2a2a32; }
+    .compose-col { background: #0c0c0e; border: 1px solid #1d1d22; }
+    .recipe { background: #0c0c0e; border: 1px solid #1d1d22; }
+    pre { background: #0a0a0c; border-color: #1a1a1f; }
+
+    .section-label { display: inline-block; font-family: "SF Mono","Fira Code",monospace; font-size: 0.7rem; color: #777; background: #131318; border: 1px solid #22222a; border-radius: 4px; padding: 2px 8px; margin-left: 4px; letter-spacing: 0.03em; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Gvnr</h1>
-    <p class="tagline">AI agent substrate — caps, coordination, human override.</p>
-    <p class="value-prop">One MCP endpoint, one credit pool. Compose <code style="font-family:monospace;color:#a78bfa">budget_clear → rate_check → idempotency_check → call LLM → reconcile</code> before every provider request, or fall back to <code style="font-family:monospace;color:#a78bfa">request_approval</code> when an agent needs a human in the loop.</p>
-
-    <div class="header-row">
-      <div class="status">
-        <div class="dot"></div>
-        <div class="status-text"><strong>Live</strong> &nbsp;·&nbsp; <span class="network-badge">${network}</span></div>
+    <header class="hero">
+      <div class="hero-text">
+        <h1>Gvnr</h1>
+        <p class="tagline">AI agent substrate — caps, coordination, human override.</p>
+        <p class="value-prop">One MCP endpoint, one credit pool. Compose <code style="font-family:monospace;color:#c4b5fd">budget_clear → rate_check → idempotency_check → call LLM → reconcile</code> before every provider request, or fall back to <code style="font-family:monospace;color:#c4b5fd">request_approval</code> when an agent needs a human.</p>
+        <div class="header-row">
+          <div class="status">
+            <div class="dot"></div>
+            <div class="status-text"><strong>Live</strong> &nbsp;·&nbsp; <span class="network-badge">${network}</span></div>
+          </div>
+          <a class="cta-btn" href="#credit-packs">Top up credits →</a>
+        </div>
       </div>
-      <a class="cta-btn" href="#credit-packs">Top up credits →</a>
-    </div>
+      <div class="hero-terminal" aria-hidden="true">
+        <div class="ht-bar">
+          <div class="ht-dot"></div><div class="ht-dot"></div><div class="ht-dot"></div>
+          <div class="ht-host">agent@research-loop</div>
+        </div>
+        <div class="ht-line"><span class="ht-prompt">$</span><span class="ht-cmd">budget_clear</span> <span class="ht-arg">model=opus-4-7 tokens=2000</span></div>
+        <div class="ht-line"><span class="ht-ok">✓ approved</span> <span class="ht-arg">·</span> <span class="ht-amt">−$0.150</span> <span class="ht-arg">· bal $4.85</span></div>
+        <div class="ht-line gap"><span class="ht-prompt">$</span><span class="ht-cmd">rate_check</span> <span class="ht-arg">provider=anthropic model=opus-4-7</span></div>
+        <div class="ht-line"><span class="ht-ok">✓ allowed</span> <span class="ht-arg">· 4/30 RPM</span></div>
+        <div class="ht-line gap"><span class="ht-prompt">$</span><span class="ht-comment"># → your LLM call</span></div>
+        <div class="ht-line gap"><span class="ht-prompt">$</span><span class="ht-cmd">reconcile</span> <span class="ht-arg">actual_in=1800 actual_out=2400</span></div>
+        <div class="ht-line"><span class="ht-ok">✓ drift</span> <span class="ht-arg">·</span> <span class="ht-amt">+$0.012</span> <span class="ht-arg">refunded · bal $4.86</span></div>
+      </div>
+    </header>
+
+    <nav class="docs-nav">
+      <span class="nav-label">On this page</span>
+      <a href="#credit-packs">Packs</a>
+      <span class="nav-dot">·</span>
+      <a href="#tools">Tools</a>
+      <span class="nav-dot">·</span>
+      <a href="#compose">Compose</a>
+      <span class="nav-dot">·</span>
+      <a href="#quickstart">Quick start</a>
+      <span class="nav-dot">·</span>
+      <a href="#pricing">Pricing</a>
+      <span class="nav-dot" style="margin:0 6px">|</span>
+      <span class="nav-label">Reference</span>
+      <a href="/openapi.json">OpenAPI</a>
+      <span class="nav-dot">·</span>
+      <a href="/.well-known/mcp.json">MCP card</a>
+      <span class="nav-dot">·</span>
+      <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
+    </nav>
 
     <section id="credit-packs">
       <h2>Credit packs</h2>
@@ -506,7 +605,6 @@ app.get('/', (c) => {
 
     <section id="tools">
       <h2>MCP Tools</h2>
-      <p style="font-size:0.82rem;color:#888;margin-bottom:14px">Jump to: <a href="#spend" style="color:#a78bfa">#spend</a> · <a href="#rate-limits" style="color:#a78bfa">#rate-limits</a> · <a href="#reconcile" style="color:#a78bfa">#reconcile</a> · <a href="#idempotency" style="color:#a78bfa">#idempotency</a> · <a href="#approvals" style="color:#a78bfa">#approvals</a> · <a href="#pricing" style="color:#a78bfa">#pricing</a></p>
 
       <h3 id="spend" style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#777;margin:18px 0 10px">Spend cap</h3>
       <div class="tools">
@@ -553,98 +651,158 @@ app.get('/', (c) => {
       </div>
 
       <h3 id="approvals" style="font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#777;margin:18px 0 10px">Approval bridge <span style="font-size:0.65rem;color:#a78bfa;background:#1a1a2e;border:1px solid #2a2a4a;padding:1px 6px;border-radius:4px;margin-left:4px;letter-spacing:0.04em">NEW</span></h3>
-      <div class="tools">
-        <div class="tool">
-          <div class="tool-name">request_approval(agent_id, action_summary, ttl_seconds?, channels?)</div>
-          <div class="tool-desc">Pause for a human in the loop. Returns approval_id + a mobile-friendly approval URL; the human taps approve/deny. Notifies via email today (Telegram + SMS forward-compat).</div>
+      <div class="approval-feature">
+        <div class="approval-text">
+          <div class="ap-tool">request_approval(agent_id, action_summary, ttl_seconds?, channels?)</div>
+          <div class="ap-desc">Pause for a human in the loop. Returns <code style="font-family:monospace;color:#a78bfa">approval_id</code> + a mobile-friendly URL the human taps to approve or deny. Email today; Telegram + SMS forward-compat.</div>
+          <div class="ap-tool">check_approval(approval_id)</div>
+          <div class="ap-desc">Poll the decision: pending / approved / denied / timeout. Compose with budget_clear — denial → request_approval → resume.</div>
         </div>
-        <div class="tool">
-          <div class="tool-name">check_approval(approval_id)</div>
-          <div class="tool-desc">Poll the decision: pending / approved / denied / timeout. Compose with budget_clear: denial → request_approval → resume.</div>
+        <div class="phone-mockup" aria-hidden="true">
+          <div class="phone-bar">gvnr.dev/approve</div>
+          <div class="phone-title">Approve agent action?</div>
+          <div class="phone-meta"><strong>Agent</strong> · research-loop</div>
+          <div class="phone-meta"><strong>Action</strong> · Spend $42 on Opus extraction over 30 docs</div>
+          <div class="phone-expire">Expires in 4:23</div>
+          <div class="phone-btn approve">Approve</div>
+          <div class="phone-btn deny">Deny</div>
         </div>
       </div>
     </section>
 
-    <section>
-      <h2>Quick start</h2>
-      <pre># 1. Provision an account
-curl -X POST https://gvnr.dev/v1/account
-# → { "api_key": "bg_...", "account_id": "..." }</pre>
-
-      <p style="font-size:0.8rem;color:#888;margin:10px 0 6px"># 2. Top up credits — open in your browser</p>
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
-        <div style="font-family:'SF Mono','Fira Code',monospace;font-size:0.78rem;color:#ccc;background:#111;border:1px solid #1f1f1f;border-radius:8px;padding:10px 12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="qs-url">https://gvnr.dev/pay/starter?api_key=bg_YOUR_KEY</div>
-        <button onclick="(function(b){navigator.clipboard.writeText(document.getElementById('qs-url').textContent).then(()=>{var t=b.textContent;b.textContent='Copied!';setTimeout(()=>b.textContent=t,1500)})})(this)" style="border:none;border-radius:6px;padding:9px 14px;font-size:0.82rem;font-weight:500;cursor:pointer;background:#1a1a2e;color:#a78bfa;border:1px solid #2a2a4a;white-space:nowrap">Copy</button>
+    <section id="compose">
+      <h2>How it composes</h2>
+      <div class="compose">
+        <div class="compose-col">
+          <div class="compose-col-head">Setup · once per agent</div>
+          <div class="compose-step">set_envelope</div>
+          <div class="compose-arrow">↓</div>
+          <div class="compose-step">set_rate_envelope</div>
+        </div>
+        <div class="compose-col">
+          <div class="compose-col-head">Runtime · every LLM call</div>
+          <div class="compose-step">budget_clear</div>
+          <div class="compose-arrow">↓</div>
+          <div class="compose-step">rate_check</div>
+          <div class="compose-arrow">↓</div>
+          <div class="compose-step">idempotency_check</div>
+          <div class="compose-arrow">↓</div>
+          <div class="compose-step muted">your LLM call</div>
+          <div class="compose-arrow">↓</div>
+          <div class="compose-step">reconcile</div>
+        </div>
+        <div class="compose-col">
+          <div class="compose-col-head">Branch · on denial</div>
+          <div class="compose-step">request_approval</div>
+          <div class="compose-arrow">↓</div>
+          <div class="compose-step muted">human taps approve</div>
+          <div class="compose-arrow">↓</div>
+          <div class="compose-step">check_approval</div>
+          <div class="compose-arrow">↓</div>
+          <div class="compose-step muted">resume the call</div>
+        </div>
       </div>
+      <p class="compose-note">One credit pool draws across all calls. Same auth, same endpoint, no extra infra. Any tool can be added or removed without re-integrating.</p>
+    </section>
 
-      <pre># 3. Set a spend envelope for your agent
-curl -X PUT \\
+    <section id="quickstart">
+      <h2>Quick start</h2>
+      <p style="font-size:0.82rem;color:#888;margin-bottom:14px">Pick a recipe. Each one is independent — you can layer them as your agent grows.</p>
+
+      <div class="recipes">
+        <div class="recipe">
+          <div class="recipe-head">Recipe 1 · Provision + top up</div>
+          <div class="recipe-sub">Get an API key and add credits. Required once per account.</div>
+          <pre>curl -X POST https://gvnr.dev/v1/account
+# → { "api_key": "bg_...", "account_id": "..." }</pre>
+          <p style="font-size:0.78rem;color:#888;margin:10px 0 6px">Then open the pay page in your browser (replace the key):</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div style="font-family:'SF Mono','Fira Code',monospace;font-size:0.76rem;color:#ccc;background:#111;border:1px solid #1f1f1f;border-radius:6px;padding:9px 12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="qs-url">https://gvnr.dev/pay/starter?api_key=bg_YOUR_KEY</div>
+            <button onclick="(function(b){navigator.clipboard.writeText(document.getElementById('qs-url').textContent).then(()=>{var t=b.textContent;b.textContent='Copied!';setTimeout(()=>b.textContent=t,1500)})})(this)" style="border:none;border-radius:6px;padding:8px 12px;font-size:0.78rem;font-weight:500;cursor:pointer;background:#1a1a2e;color:#a78bfa;border:1px solid #2a2a4a;white-space:nowrap">Copy</button>
+          </div>
+        </div>
+
+        <div class="recipe">
+          <div class="recipe-head">Recipe 2 · Spend cap</div>
+          <div class="recipe-sub">Set a daily ceiling per agent, clear before each call, reconcile after. The core loop.</div>
+          <pre># Set the envelope (once)
+curl -X PUT https://gvnr.dev/v1/budget/envelope \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"agent_id":"my-agent","limit_usd":5,"window":"daily"}' \\
-  https://gvnr.dev/v1/budget/envelope
+  -d '{"agent_id":"my-agent","limit_usd":5,"window":"daily"}'
 
-# 4. Set a rate envelope (e.g. 30 Sonnet RPM via Anthropic)
-curl -X PUT \\
+# Before each LLM call
+curl -X POST https://gvnr.dev/v1/budget/clear \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"agent_id":"my-agent","provider":"anthropic","model":"claude-sonnet-4-6","requests_per_minute":30}' \\
-  https://gvnr.dev/v1/rate/envelope
+  -d '{"agent_id":"my-agent","model":"claude-sonnet-4-6","estimated_tokens":2000}'
 
-# 5. Before each LLM request: budget_clear then rate_check
-curl -X POST \\
+# After the LLM responds
+curl -X POST https://gvnr.dev/v1/budget/reconcile \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"agent_id":"my-agent","model":"claude-sonnet-4-6","estimated_tokens":2000}' \\
-  https://gvnr.dev/v1/budget/clear
+  -d '{"agent_id":"my-agent","actual_input_tokens":1800,"actual_output_tokens":2400}'</pre>
+        </div>
 
-curl -X POST \\
+        <div class="recipe">
+          <div class="recipe-head">Recipe 3 · Rate limits</div>
+          <div class="recipe-sub">Coordinate RPM across multiple agents sharing the same provider quota.</div>
+          <pre># Set the rate envelope (once)
+curl -X PUT https://gvnr.dev/v1/rate/envelope \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"agent_id":"my-agent","provider":"anthropic","model":"claude-sonnet-4-6"}' \\
-  https://gvnr.dev/v1/rate/check
+  -d '{"agent_id":"my-agent","provider":"anthropic","model":"claude-sonnet-4-6","requests_per_minute":30}'
 
-# 6. (optional) Dedupe retries with idempotency_check
-curl -X POST \\
+# Before each LLM call
+curl -X POST https://gvnr.dev/v1/rate/check \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"key":"job-abc-123","ttl_seconds":3600}' \\
-  https://gvnr.dev/v1/idempotency/check
+  -d '{"agent_id":"my-agent","provider":"anthropic","model":"claude-sonnet-4-6"}'</pre>
+        </div>
 
-# 7. After the LLM responds, reconcile against actual usage
-curl -X POST \\
+        <div class="recipe">
+          <div class="recipe-head">Recipe 4 · Idempotency</div>
+          <div class="recipe-sub">Dedupe retries on a caller-supplied key. <code style="font-family:monospace;color:#a78bfa">is_first_call=true</code> the first time, <code style="font-family:monospace;color:#a78bfa">false</code> on replays.</div>
+          <pre>curl -X POST https://gvnr.dev/v1/idempotency/check \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"agent_id":"my-agent","actual_input_tokens":1800,"actual_output_tokens":2400}' \\
-  https://gvnr.dev/v1/budget/reconcile
+  -d '{"key":"job-abc-123","ttl_seconds":3600}'</pre>
+        </div>
 
-# 8. (optional) Human-in-the-loop — set notification email, then request approval
-curl -X POST \\
+        <div class="recipe">
+          <div class="recipe-head">Recipe 5 · Human-in-the-loop</div>
+          <div class="recipe-sub">When budget_clear denies (or for any sensitive action), hand off to a human via a mobile-friendly approval URL.</div>
+          <pre># Set your notification email (once)
+curl -X POST https://gvnr.dev/v1/account/notification-email \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"email":"you@example.com"}' \\
-  https://gvnr.dev/v1/account/notification-email
+  -d '{"email":"you@example.com"}'
 
-curl -X POST \\
+# Request approval (returns approval_url)
+curl -X POST https://gvnr.dev/v1/approval/request \\
   -H "Authorization: Bearer bg_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"agent_id":"my-agent","action_summary":"Spend $42 on Opus extraction over 30 docs","ttl_seconds":600}' \\
-  https://gvnr.dev/v1/approval/request
-# → { "approval_id": "...", "approval_url": "https://gvnr.dev/approve/...", "expires_at": ... }
+  -d '{"agent_id":"my-agent","action_summary":"Spend $42 on Opus extraction over 30 docs","ttl_seconds":600}'
 
-curl -H "Authorization: Bearer bg_YOUR_KEY" \\
-  https://gvnr.dev/v1/approval/check/APPROVAL_ID
+# Poll for the decision
+curl https://gvnr.dev/v1/approval/check/APPROVAL_ID \\
+  -H "Authorization: Bearer bg_YOUR_KEY"
 # → { "decision": "pending" | "approved" | "denied" | "timeout", ... }</pre>
+        </div>
+      </div>
     </section>
 
     <section id="pricing">
       <h2>Model pricing</h2>
       <pre>claude-opus-4-7      $15.00 / $75.00  per M tokens (in / out)
+claude-opus-4-6      $15.00 / $75.00
 claude-sonnet-4-6     $3.00 / $15.00
 claude-haiku-4-5      $0.80 /  $4.00
 gpt-4o                $2.50 / $10.00
 gpt-4o-mini           $0.15 /  $0.60
-gemini-1-5-pro        $1.25 /  $3.50</pre>
+gpt-4-turbo          $10.00 / $30.00
+gemini-1-5-pro        $1.25 /  $3.50
+gemini-1-5-flash      $0.08 /  $0.30</pre>
       <p style="font-size:0.8rem;color:#888;margin-top:10px">budget_clear deducts estimated output cost; reconcile applies the drift using both input and output rates. Unlisted models default to $75.00/M output tokens (Opus rate — fail-safe). Updated May 2026.</p>
     </section>
 
