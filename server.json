@@ -1,0 +1,25 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "dev.gvnr/gvnr",
+  "title": "Gvnr",
+  "description": "AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, one credit pool.",
+  "version": "1.5.0",
+  "repository": {
+    "url": "https://github.com/mightbesaad/gvnr",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://gvnr.dev/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer API key obtained from POST https://gvnr.dev/v1/account",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
