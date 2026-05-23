@@ -32,18 +32,18 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   const accountId = account.account_id;
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
 
-  const server = new McpServer({ name: 'gvnr', version: '1.4.0' });
+  const server = new McpServer({ name: 'gvnr', version: '1.5.0' });
 
   const origin = new URL(c.req.url).origin;
 
   server.registerTool(
     'budget_clear',
     {
-      description: 'Check if an agent is authorized to spend tokens and deduct the estimated cost from its envelope.',
+      description: 'Check if an agent is authorized to spend tokens and deduct the estimated cost from its envelope. For chat models pass output tokens; for embedding models (text-embedding-3-*, gemini-embedding-*) pass input tokens since those are billed input-only.',
       inputSchema: {
         agent_id: z.string().max(128).describe('The agent identifier'),
-        model: z.string().describe('Model being called (e.g. claude-sonnet-4-6, gpt-4o)'),
-        estimated_tokens: z.number().int().finite().positive().describe('Estimated output tokens for the request'),
+        model: z.string().describe('Model being called (e.g. claude-sonnet-4-6, gpt-4o, text-embedding-3-small)'),
+        estimated_tokens: z.number().int().finite().positive().describe('Tokens to be billed — output tokens for chat models, input tokens for input-only models (embeddings)'),
       },
       annotations: {
         title: 'Clear budget for a planned LLM call',

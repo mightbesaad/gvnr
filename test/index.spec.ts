@@ -459,6 +459,113 @@ describe('POST /v1/budget/reconcile', () => {
   });
 });
 
+// ── Embedding (input-only) models ─────────────────────────────────────────────
+
+describe('input-only embedding models', () => {
+  it('budget_clear estimates at input rate, not output rate', async () => {
+    // text-embedding-3-small @ $0.02/M input. 1M tokens → $0.02 estimated.
+    // (Pre-fix: estimateCostUsd used output rate × 1M = $0; gate was invisible.)
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 1);
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'embed-agent', limit_usd: 0.5 }),
+    });
+    const res = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'embed-agent', model: 'text-embedding-3-small', estimated_tokens: 1_000_000 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ approved: boolean; remaining_usd: number }>();
+    expect(body.approved).toBe(true);
+    // Envelope was $0.50, cost $0.02 → remaining $0.48
+    expect(body.remaining_usd).toBeCloseTo(0.48, 6);
+  });
+
+  it('budget_clear blocks when embedding cost exceeds envelope', async () => {
+    // text-embedding-3-large @ $0.13/M. 10M tokens → $1.30 cost; envelope only $0.50.
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 5);
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'embed-agent', limit_usd: 0.5 }),
+    });
+    const res = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'embed-agent', model: 'text-embedding-3-large', estimated_tokens: 10_000_000 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ approved: boolean; reason?: string }>();
+    expect(body.approved).toBe(false);
+    expect(body.reason).toBe('envelope_exceeded');
+  });
+
+  it('reconcile uses input rate for embedding model', async () => {
+    // text-embedding-3-small clearance: 500k tokens → $0.01 estimated.
+    // Reconcile with actual 500k input + 0 output → actual = $0.01; drift = 0.
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 1);
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'embed-agent', limit_usd: 1 }),
+    });
+    await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'embed-agent', model: 'text-embedding-3-small', estimated_tokens: 500_000 }),
+    });
+    const res = await SELF.fetch('http://localhost/v1/budget/reconcile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'embed-agent', actual_input_tokens: 500_000, actual_output_tokens: 0 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ ok: boolean; drift_usd: number; balance_usd: number }>();
+    expect(body.ok).toBe(true);
+    expect(body.drift_usd).toBeCloseTo(0, 6);
+    // Balance: $1.00 - $0.01 (estimated, deducted at clear) - $0 (drift) = $0.99
+    expect(body.balance_usd).toBeCloseTo(0.99, 6);
+  });
+
+  it('mixed envelope: chat clear + embedding clear share the same envelope', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10);
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'mixed-agent', limit_usd: 1 }),
+    });
+    // First call: sonnet 1000 output tokens → $0.015
+    const chat = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'mixed-agent', model: 'claude-sonnet-4-6', estimated_tokens: 1000 }),
+    });
+    expect(chat.status).toBe(200);
+    await SELF.fetch('http://localhost/v1/budget/reconcile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'mixed-agent', actual_input_tokens: 0, actual_output_tokens: 1000 }),
+    });
+    // Second call: embedding 1M tokens → $0.02
+    const embed = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'mixed-agent', model: 'text-embedding-3-small', estimated_tokens: 1_000_000 }),
+    });
+    expect(embed.status).toBe(200);
+    const embedBody = await embed.json<{ approved: boolean; remaining_usd: number }>();
+    expect(embedBody.approved).toBe(true);
+    // Remaining: $1.00 - $0.015 (chat) - $0.02 (embed) = $0.965
+    expect(embedBody.remaining_usd).toBeCloseTo(0.965, 6);
+  });
+});
+
 // ── Rate Limit Coordinator ────────────────────────────────────────────────────
 
 describe('Rate Limit Coordinator', () => {
@@ -1048,23 +1155,23 @@ describe('Agent Approval Bridge', () => {
 // ── Brand surface: MCP card and homepage reflect Slot 5 rename ───────────────
 
 describe('Slot 5 brand surface', () => {
-  it('mcp.json card name is "Gvnr" and version 1.4.0', async () => {
+  it('mcp.json card name is "Gvnr" and version 1.5.0', async () => {
     const res = await SELF.fetch('http://localhost/.well-known/mcp.json');
     expect(res.status).toBe(200);
     const body = await res.json<{ name: string; version: string; tools: { name: string }[] }>();
     expect(body.name).toBe('Gvnr');
-    expect(body.version).toBe('1.4.0');
+    expect(body.version).toBe('1.5.0');
     const toolNames = body.tools.map((t) => t.name);
     expect(toolNames).toContain('request_approval');
     expect(toolNames).toContain('check_approval');
   });
 
-  it('openapi.json title is "Gvnr" and version 1.4.0', async () => {
+  it('openapi.json title is "Gvnr" and version 1.5.0', async () => {
     const res = await SELF.fetch('http://localhost/openapi.json');
     expect(res.status).toBe(200);
     const body = await res.json<{ info: { title: string; version: string }; paths: Record<string, unknown> }>();
     expect(body.info.title).toBe('Gvnr');
-    expect(body.info.version).toBe('1.4.0');
+    expect(body.info.version).toBe('1.5.0');
     expect(body.paths['/v1/approval/request']).toBeDefined();
     expect(body.paths['/v1/approval/check/{approval_id}']).toBeDefined();
   });

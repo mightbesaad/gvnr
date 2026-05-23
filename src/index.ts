@@ -65,9 +65,9 @@ app.get('/.well-known/agent-skills/index.json', (c) => {
       {
         name: 'budget_clear',
         type: 'mcp',
-        description: 'Check if an agent is authorized to spend tokens and deduct the estimated cost from its envelope.',
+        description: 'Check if an agent is authorized to spend tokens and deduct the estimated cost from its envelope. For chat models pass output tokens; for embedding/input-only models pass input tokens.',
         url: 'https://gvnr.dev/mcp',
-        sha256: '7109eb205933377306b30da55acd5899319ffddc79bf4bdf13100ad85cd2f87a',
+        sha256: '65c73571b38c2a921d342f91535a28353f4e1e87756829f4a16d7850c783c5f1',
       },
       {
         name: 'set_envelope',
@@ -146,7 +146,7 @@ app.get('/.well-known/mcp.json', (c) => {
   return c.json({
     name: 'Gvnr',
     description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, one credit pool.',
-    version: '1.4.0',
+    version: '1.5.0',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
     authentication: {
@@ -207,7 +207,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Gvnr', version: '1.4.0', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
+    info: { title: 'Gvnr', version: '1.5.0', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
@@ -802,8 +802,13 @@ gpt-4o                $2.50 / $10.00
 gpt-4o-mini           $0.15 /  $0.60
 gpt-4-turbo          $10.00 / $30.00
 gemini-1-5-pro        $1.25 /  $3.50
-gemini-1-5-flash      $0.08 /  $0.30</pre>
-      <p style="font-size:0.8rem;color:#888;margin-top:10px">budget_clear deducts estimated output cost; reconcile applies the drift using both input and output rates. Unlisted models default to $75.00/M output tokens (Opus rate — fail-safe). Updated May 2026.</p>
+gemini-1-5-flash      $0.08 /  $0.30
+
+text-embedding-3-small  $0.02 / M   (input-only)
+text-embedding-3-large  $0.13 / M   (input-only)
+gemini-embedding-001    $0.15 / M   (input-only)
+gemini-embedding-2      $0.20 / M   (input-only)</pre>
+      <p style="font-size:0.8rem;color:#888;margin-top:10px">budget_clear deducts estimated cost (output tokens for chat models, input tokens for embedding/input-only models); reconcile applies the drift using both rates. Unlisted models default to $75.00/M output tokens (Opus rate — fail-safe). Updated May 2026.</p>
     </section>
 
     <footer>
