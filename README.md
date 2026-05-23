@@ -1,6 +1,8 @@
-# Budget Governor
+# Gvnr
 
-Substrate primitives for AI agents — spend caps, rate limits, idempotency, post-call reconciliation. One MCP endpoint, one credit pool, no infrastructure to deploy.
+Substrate primitives for AI agents — spend caps, rate limits, idempotency, post-call reconciliation, human approval bridges. One MCP endpoint, one credit pool, no infrastructure to deploy.
+
+Listed on the Official MCP Registry as [`dev.gvnr/gvnr`](https://registry.modelcontextprotocol.io/v0.1/servers?search=dev.gvnr/gvnr).
 
 No deployment. No proxy. No self-hosting.
 
@@ -10,7 +12,7 @@ No deployment. No proxy. No self-hosting.
 
 Agents cost 10–12x more than estimated in production. System prompts, retry loops, and tool calls multiply fast. A runaway agent can generate a $47,000 bill in 11 days. The common fix — self-hosting LiteLLM — requires running infrastructure most developers won't set up.
 
-Budget Governor is the hosted alternative: an external authority your agent checks before spending.
+Gvnr is the hosted alternative: an external authority your agent checks before spending.
 
 ---
 
@@ -132,7 +134,7 @@ https://gvnr.dev/mcp?api_key=bg_YOUR_KEY
 ### Claude Code
 
 ```bash
-claude mcp add budget-governor --transport http \
+claude mcp add gvnr --transport http \
   "https://gvnr.dev/mcp?api_key=bg_YOUR_KEY"
 ```
 
@@ -207,7 +209,7 @@ Top up at `GET /pay/:pack?api_key=bg_YOUR_KEY`. Send USDC on Base mainnet — cr
 
 ## Supported models
 
-Model pricing is a static lookup on the hot path — no external calls. Includes claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5, gpt-4o, gpt-4o-mini, and others. Unknown models fall back to a conservative default.
+Model pricing is a static lookup on the hot path — no external calls. Includes claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5, gpt-4o, gpt-4o-mini, and others. Embedding models (text-embedding-3-small/large, gemini-embedding-001/2) are billed input-only — pass input tokens to `budget_clear` for those. Unknown models fall back to a conservative default.
 
 ---
 

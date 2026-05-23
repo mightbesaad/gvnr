@@ -145,7 +145,7 @@ app.get('/.well-known/mcp.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     name: 'Gvnr',
-    description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, one credit pool.',
+    description: 'AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges',
     version: '1.5.0',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
