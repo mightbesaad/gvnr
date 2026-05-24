@@ -3,7 +3,8 @@
   "name": "dev.gvnr/gvnr",
   "title": "Gvnr",
   "description": "AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges",
-  "version": "1.5.0",
+  "version": "1.5.1",
+  "websiteUrl": "https://gvnr.dev",
   "repository": {
     "url": "https://github.com/mightbesaad/gvnr",
     "source": "github"
@@ -21,5 +22,22 @@
         }
       ]
     }
-  ]
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "license": "MIT",
+      "categories": [
+        "agent-infrastructure",
+        "spend-management",
+        "rate-limiting",
+        "idempotency",
+        "approval-workflows",
+        "x402-payments"
+      ],
+      "docs": "https://gvnr.dev",
+      "pricing": "https://gvnr.dev#pricing",
+      "manifest": "https://gvnr.dev/.well-known/mcp.json",
+      "agentSkills": "https://gvnr.dev/.well-known/agent-skills/index.json"
+    }
+  }
 }
