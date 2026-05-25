@@ -12,7 +12,13 @@ tos.get('/', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Terms &amp; Privacy — Budget Governor</title>
+  <title>Terms &amp; Privacy — Gvnr</title>
+  <meta name="description" content="Terms of service, refund policy, and privacy notice for Gvnr — the x402-paying AI agent substrate at gvnr.dev.">
+  <meta property="og:title" content="Terms &amp; Privacy — Gvnr">
+  <meta property="og:description" content="Terms of service, refund policy, and privacy notice for Gvnr.">
+  <meta property="og:url" content="https://gvnr.dev/tos">
+  <meta property="og:type" content="website">
+  <meta name="robots" content="index, follow">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 48px 24px; min-height: 100vh; }
@@ -37,11 +43,11 @@ tos.get('/', (c) => {
 <body>
   <div class="container">
     <h1>Terms &amp; Privacy</h1>
-    <p class="sub">Budget Governor &mdash; Effective May 2026</p>
+    <p class="sub">Gvnr &mdash; Effective May 2026</p>
 
     <section>
       <h2>Terms of Service</h2>
-      <p><strong>1. Service.</strong> Budget Governor provides API endpoints and an MCP server for controlling AI agent spend. The service is provided "as is" without warranties of any kind. Use at your own risk.</p>
+      <p><strong>1. Service.</strong> Gvnr provides API endpoints and an MCP server for controlling AI agent spend. The service is provided "as is" without warranties of any kind. Use at your own risk.</p>
       <p><strong>2. Accounts.</strong> Accounts are provisioned via <code>POST /v1/account</code>. You receive a random API key. You are solely responsible for keeping it secure. There is no account recovery — if you lose your API key, those credits are lost.</p>
       <p><strong>3. Credits.</strong> Credits are purchased in packs via USDC on Base mainnet. Credits do not expire. One credit pack purchase covers one account; credits are not transferable between accounts.</p>
       <p><strong>4. Acceptable use.</strong> You may not use the service to:</p>
@@ -50,7 +56,7 @@ tos.get('/', (c) => {
         <li>Access accounts that are not yours</li>
         <li>Send automated requests at volumes that degrade service for others</li>
       </ul>
-      <p><strong>5. Limitation of liability.</strong> To the maximum extent permitted by law, Budget Governor and its operator are not liable for any direct, indirect, incidental, or consequential damages arising from your use of the service, including lost credits, runaway agent costs, or service downtime.</p>
+      <p><strong>5. Limitation of liability.</strong> To the maximum extent permitted by law, Gvnr and its operator are not liable for any direct, indirect, incidental, or consequential damages arising from your use of the service, including lost credits, runaway agent costs, or service downtime.</p>
       <p><strong>6. Changes.</strong> These terms may be updated at any time. Continued use of the service after changes constitutes acceptance.</p>
     </section>
 
