@@ -65,6 +65,33 @@ describe('GET /', () => {
     const text = await res.text();
     expect(text).toContain('Gvnr');
     expect(text).toContain('budget_clear');
+    expect(text).toContain('x402-paying');
+    expect(text).toContain('x402 ·');
+  });
+});
+
+describe('GET /b2b', () => {
+  it('returns HTML B2B page with three sections', async () => {
+    const res = await SELF.fetch('http://localhost/b2b');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const text = await res.text();
+    expect(text).toContain("What's available today");
+    expect(text).toContain('Coming soon');
+    expect(text).toContain('How to talk to us');
+    expect(text).toContain('admin@gvnr.dev');
+    expect(text).toContain('SEPA EUR');
+  });
+});
+
+describe('GET /sitemap.xml', () => {
+  it('lists /b2b alongside / and /tos', async () => {
+    const res = await SELF.fetch('http://localhost/sitemap.xml');
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain('https://gvnr.dev/');
+    expect(text).toContain('https://gvnr.dev/b2b');
+    expect(text).toContain('https://gvnr.dev/tos');
   });
 });
 

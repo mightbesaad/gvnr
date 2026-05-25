@@ -11,6 +11,7 @@ import approvalRoutes from './routes/approval';
 import approveRoutes from './routes/approve';
 import payRoutes from './routes/pay';
 import tosRoutes from './routes/tos';
+import b2bRoutes from './routes/b2b';
 import { getAccount } from './lib/kv';
 export { AccountState } from './lib/account-do';
 
@@ -134,6 +135,7 @@ app.get('/sitemap.xml', (c) => {
   return c.body(`<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://gvnr.dev/</loc></url>
+  <url><loc>https://gvnr.dev/b2b</loc></url>
   <url><loc>https://gvnr.dev/tos</loc></url>
   <url><loc>https://gvnr.dev/pay/starter</loc></url>
   <url><loc>https://gvnr.dev/pay/growth</loc></url>
@@ -145,7 +147,7 @@ app.get('/.well-known/mcp.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     name: 'Gvnr',
-    description: 'AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges',
+    description: 'x402-paying AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges. One MCP endpoint, one credit pool, settled via x402 (USDC on Base).',
     version: '1.5.1',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
@@ -532,14 +534,14 @@ app.get('/', (c) => {
     <header class="hero">
       <div class="hero-text">
         <h1>Gvnr</h1>
-        <p class="tagline">AI agent substrate — caps, coordination, human override.</p>
-        <p class="value-prop">One MCP endpoint, one credit pool. Compose <code style="font-family:monospace;color:#c4b5fd">budget_clear → rate_check → idempotency_check → call LLM → reconcile</code> before every provider request, or fall back to <code style="font-family:monospace;color:#c4b5fd">request_approval</code> when an agent needs a human.</p>
+        <p class="tagline">Substrate for x402-paying AI agents — pre-call caps, rate coordination, human override.</p>
+        <p class="value-prop">One MCP endpoint, one credit pool, settled via x402 (USDC on Base). Compose <code style="font-family:monospace;color:#c4b5fd">budget_clear → rate_check → idempotency_check → call LLM → reconcile</code> before every provider request, or fall back to <code style="font-family:monospace;color:#c4b5fd">request_approval</code> when an agent needs a human.</p>
         <div class="header-row">
           <div class="status">
             <div class="dot"></div>
-            <div class="status-text"><strong>Live</strong> &nbsp;·&nbsp; <span class="network-badge">${network}</span></div>
+            <div class="status-text"><strong>Live</strong> &nbsp;·&nbsp; <span class="network-badge">x402 · ${network}</span></div>
           </div>
-          <a class="cta-btn" href="#credit-packs">Top up credits →</a>
+          <a class="cta-btn" href="#credit-packs">Top up with USDC →</a>
         </div>
       </div>
       <div class="hero-terminal" aria-hidden="true">
@@ -570,6 +572,8 @@ app.get('/', (c) => {
       <a href="#pricing">Pricing</a>
       <span class="nav-dot" style="margin:0 6px">|</span>
       <span class="nav-label">Reference</span>
+      <a href="/b2b">B2B</a>
+      <span class="nav-dot">·</span>
       <a href="/openapi.json">OpenAPI</a>
       <span class="nav-dot">·</span>
       <a href="/.well-known/mcp.json">MCP card</a>
@@ -600,7 +604,7 @@ app.get('/', (c) => {
         <input class="key-input" id="api-key-input" type="text" placeholder="Paste your API key (bg_...)" autocomplete="off" spellcheck="false">
         <button class="btn-get-key" id="get-key-btn" onclick="getApiKey()">Get API key</button>
       </div>
-      <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay with USDC on Base mainnet. Credits added immediately after on-chain verification.</p>
+      <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay via x402 — USDC on Base mainnet. Credits added immediately after on-chain verification.</p>
     </section>
 
     <section id="tools">
@@ -802,7 +806,7 @@ gpt-4o                $2.50 / $10.00
 gpt-4o-mini           $0.15 /  $0.60
 gpt-4-turbo          $10.00 / $30.00
 gemini-1-5-pro        $1.25 /  $3.50
-gemini-1-5-flash      $0.08 /  $0.30
+gemini-1-5-flash     $0.075 /  $0.30
 
 text-embedding-3-small  $0.02 / M   (input-only)
 text-embedding-3-large  $0.13 / M   (input-only)
@@ -819,7 +823,9 @@ gemini-embedding-2      $0.20 / M   (input-only)</pre>
         <span>·</span>
         <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
         <span>·</span>
-        <a href="/tos">Terms</a>
+        <a href="/tos">Terms &amp; Privacy</a>
+        <span>·</span>
+        <a href="mailto:admin@gvnr.dev">admin@gvnr.dev</a>
         <span>·</span>
         <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">Support</a>
       </div>
@@ -932,6 +938,7 @@ app.post('/v1/admin/seed', async (c) => {
 // /v1/packs/:pack/info, /v1/account/topup-verify/:pack, /pay/:pack
 app.route('/', payRoutes);
 app.route('/tos', tosRoutes);
+app.route('/b2b', b2bRoutes);
 
 // x402 payment gate — must run before account routes so topup/:pack sees payment verification.
 // Initialized lazily on first request so PAYTO_ADDRESS is available from env.

@@ -225,7 +225,7 @@ function payPage(d: PageData): string {
 <body>
 <div class="container">
   <h1>Top up your account</h1>
-  <p class="sub">Pay with USDC on Base &nbsp;·&nbsp; <span class="badge ${isTestnet ? 'testnet' : ''}">${d.networkName}</span></p>
+  <p class="sub">Pay via x402 — USDC on Base &nbsp;·&nbsp; <span class="badge ${isTestnet ? 'testnet' : ''}">${d.networkName}</span></p>
 
   <!-- Step 1: Pack -->
   <div class="card">
