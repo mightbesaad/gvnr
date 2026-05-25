@@ -32,7 +32,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   const accountId = account.account_id;
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
 
-  const server = new McpServer({ name: 'gvnr', version: '1.5.0' });
+  const server = new McpServer({ name: 'gvnr', version: '1.5.1' });
 
   const origin = new URL(c.req.url).origin;
 
