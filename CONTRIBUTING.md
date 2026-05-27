@@ -1,22 +1,34 @@
-# Contributing
+# Contributing to Gvnr
 
-## Bug reports and feature requests
+Gvnr is currently maintained by a solo founder. Contributions are welcome — pull requests, issues, and discussion posts all land in the same place.
 
-Open a [GitHub issue](https://github.com/mightbesaad/gvnr/issues). Include steps to reproduce for bugs, or a clear use case for features.
-
-## Pull requests
-
-1. Fork the repo and create a branch from `main`
-2. Run `npm test` — all 34 tests must pass
-3. Run `npx tsc --noEmit` — no type errors
-4. Open a PR with a clear description of what and why
-
-## Local development
+## Quick start
 
 ```bash
+git clone https://github.com/mightbesaad/gvnr
+cd gvnr
 npm install
-cp .dev.vars.example .dev.vars   # set ADMIN_SECRET=dev-secret-local
-npm test                          # runs against Miniflare (no real CF account needed)
+npm test
 ```
 
-To test against a real Cloudflare deployment, see [DEPLOY.md](DEPLOY.md).
+100/100 tests should pass. If they don't, that's a real signal — open an issue with your environment details.
+
+## What's useful right now
+
+- Bug reports against any of the five primitives (Budget Governor, Reconciler, Rate Limit Coordinator, Idempotency, Approval Bridge)
+- MCP client compatibility reports (Claude Desktop, Cursor, any MCP host) — what works, what doesn't
+- Documentation improvements, especially for the integration path
+- TypeScript types feedback once the OpenAPI-generated types ship
+
+## What's not in scope yet
+
+- A bundled SDK package — gated on prospect ask or LangChain signal (see roadmap)
+- Self-hosted deployment guide — gvnr.dev runs hosted-only by design
+
+## Filing an issue
+
+For bugs: include the endpoint you called, the response you got, and the timestamp. For features: open a Discussion first; we'll move it to an issue once the design is clear.
+
+## Code of conduct
+
+Be useful. Be honest. That's it.
