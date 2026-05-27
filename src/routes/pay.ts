@@ -343,15 +343,11 @@ function showStatus(msg, type) {
   el.style.display = 'block';
 }
 
-async function verifyPayment() {
+async function attemptVerify() {
   const apiKey = document.getElementById('api-key').value.trim();
   const txHash = document.getElementById('tx-hash').value.trim();
-
-  if (!apiKey) return showStatus('Enter your API key.', 'err');
-  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return showStatus('Enter a valid transaction hash (0x + 64 hex chars).', 'err');
-
-  showStatus('Verifying on-chain...', 'info');
-
+  if (!apiKey) return { localError: 'no_key' };
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return { localError: 'bad_hash' };
   try {
     const res = await fetch('/v1/account/topup-verify/' + PACK, {
       method: 'POST',
@@ -359,24 +355,64 @@ async function verifyPayment() {
       body: JSON.stringify({ tx_hash: txHash }),
     });
     const data = await res.json();
-    if (res.ok) {
-      showStatus('Credited! New balance: $' + data.balance_usd.toFixed(2) + ' USD', 'ok');
-      document.getElementById('mcp-cmd').textContent =
-        'claude mcp add budget-governor --transport http \\\n  "https://gvnr.dev/mcp?api_key=' + apiKey + '"';
-      document.getElementById('next-steps').style.display = 'block';
-    } else {
-      const msgs = {
-        tx_not_found: 'Transaction not found yet. Wait for confirmation and try again.',
-        tx_failed: 'Transaction failed on-chain.',
-        transfer_not_found: 'No matching USDC transfer found in this transaction.',
-        rpc_error: 'Could not reach Base RPC. Try again in a moment.',
-        invalid_tx_hash: 'Invalid transaction hash format.',
-      };
-      showStatus(msgs[data.error] || ('Error: ' + data.error), 'err');
-    }
+    return { ok: res.ok, data };
   } catch {
-    showStatus('Network error. Try again.', 'err');
+    return { localError: 'network' };
   }
+}
+
+function showVerifyResult(result) {
+  const apiKey = document.getElementById('api-key').value.trim();
+  if (result.localError === 'no_key') return showStatus('Enter your API key.', 'err');
+  if (result.localError === 'bad_hash') return showStatus('Enter a valid transaction hash (0x + 64 hex chars).', 'err');
+  if (result.localError === 'network') return showStatus('Network error. Try again.', 'err');
+  if (result.ok) {
+    showStatus('Credited! New balance: $' + result.data.balance_usd.toFixed(2) + ' USD', 'ok');
+    document.getElementById('mcp-cmd').textContent =
+      'claude mcp add budget-governor --transport http \\\n  "https://gvnr.dev/mcp?api_key=' + apiKey + '"';
+    document.getElementById('next-steps').style.display = 'block';
+    return;
+  }
+  const msgs = {
+    tx_not_found: 'Transaction not found yet. Wait for confirmation and try again.',
+    tx_failed: 'Transaction failed on-chain.',
+    transfer_not_found: 'No matching USDC transfer found in this transaction.',
+    rpc_error: 'Could not reach Base RPC. Try again in a moment.',
+    invalid_tx_hash: 'Invalid transaction hash format.',
+  };
+  showStatus(msgs[result.data.error] || ('Error: ' + result.data.error), 'err');
+}
+
+async function verifyPayment() {
+  showStatus('Verifying on-chain...', 'info');
+  showVerifyResult(await attemptVerify());
+}
+
+// Auto-verify after wallet pay — retries on transient errors (tx not indexed yet, RPC blip).
+// Manual "Verify" button stays one-shot since the user controls when to retry.
+const TRANSIENT_ERRORS = new Set(['tx_not_found', 'rpc_error']);
+async function autoVerify(attempt, retryDelays) {
+  const totalAttempts = retryDelays.length + 1;
+  showStatus(
+    attempt === 1
+      ? 'Verifying on-chain...'
+      : 'Tx not indexed yet — retry ' + attempt + '/' + totalAttempts + '...',
+    'info',
+  );
+  const result = await attemptVerify();
+  const transient = !result.ok && result.data && TRANSIENT_ERRORS.has(result.data.error);
+  if (!transient || attempt >= totalAttempts) {
+    if (transient) {
+      showStatus(
+        'Transaction still not visible on-chain. Once it appears on basescan, click "Verify & Credit my account" below.',
+        'err',
+      );
+      return;
+    }
+    showVerifyResult(result);
+    return;
+  }
+  setTimeout(() => autoVerify(attempt + 1, retryDelays), retryDelays[attempt - 1]);
 }
 
 // Preview mode — ?preview=success shows post-payment UI without a real transaction
@@ -455,10 +491,11 @@ async function connectAndPay() {
     });
 
     document.getElementById('tx-hash').value = txHash;
-    showStatus('Transaction submitted (' + txHash.slice(0, 10) + '...). Waiting ~5s for confirmation...', 'info');
+    showStatus('Transaction submitted (' + txHash.slice(0, 10) + '...). Waiting for confirmation...', 'info');
     btn.textContent = 'Waiting for confirmation...';
 
-    setTimeout(() => verifyPayment(), 6000);
+    // First attempt at 6s, then retry on tx_not_found / rpc_error at +9s and +15s (≈30s total).
+    setTimeout(() => autoVerify(1, [9000, 15000]), 6000);
   } catch (err) {
     showStatus(err.message || 'Wallet error.', 'err');
     btn.textContent = 'Connect wallet & pay automatically';
