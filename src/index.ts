@@ -604,7 +604,7 @@ app.get('/', (c) => {
         <input class="key-input" id="api-key-input" type="text" placeholder="Paste your API key (bg_...)" autocomplete="off" spellcheck="false">
         <button class="btn-get-key" id="get-key-btn" onclick="getApiKey()">Get API key</button>
       </div>
-      <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay via x402 — USDC on Base mainnet. Credits added immediately after on-chain verification.</p>
+      <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay via x402 — USDC on Base mainnet. Works with Base MCP, AgentKit, and any x402 client. Credits added immediately after on-chain verification.</p>
     </section>
 
     <section id="tools">
