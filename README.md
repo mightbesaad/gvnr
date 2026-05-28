@@ -1,5 +1,11 @@
 # Gvnr
 
+[![Tests](https://github.com/mightbesaad/gvnr/actions/workflows/test.yml/badge.svg)](https://github.com/mightbesaad/gvnr/actions/workflows/test.yml)
+[![Release](https://img.shields.io/github/v/tag/mightbesaad/gvnr?label=release&color=blue)](https://github.com/mightbesaad/gvnr/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-dev.gvnr%2Fgvnr-purple)](https://registry.modelcontextprotocol.io/v0.1/servers?search=dev.gvnr/gvnr)
+[![gvnr MCP server](https://glama.ai/mcp/servers/gvnrdev/gvnr/badges/score.svg)](https://glama.ai/mcp/servers/gvnrdev/gvnr)
+
 Substrate primitives for AI agents — spend caps, rate limits, idempotency, post-call reconciliation, human approval bridges. One MCP endpoint, one credit pool, no infrastructure to deploy.
 
 Listed on the Official MCP Registry as [`dev.gvnr/gvnr`](https://registry.modelcontextprotocol.io/v0.1/servers?search=dev.gvnr/gvnr).
