@@ -39,7 +39,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'budget_clear',
     {
-      description: 'Check if an agent is authorized to spend tokens and deduct the estimated cost from its envelope. For chat models pass output tokens; for embedding models (text-embedding-3-*, gemini-embedding-*) pass input tokens since those are billed input-only.',
+      description: 'Pre-flight authorization for a planned LLM call. Estimates cost from model + estimated_tokens, deducts from the agent envelope, returns {approved:true, remaining_usd} or {approved:false, reason}. Call BEFORE the LLM request; if approved=false, skip the call. Pair with `reconcile` AFTER the LLM responds to correct drift between estimate and actual. For chat models pass output tokens; for embedding models (text-embedding-3-*, gemini-embedding-*) pass input tokens since those are billed input-only.',
       inputSchema: {
         agent_id: z.string().max(128).describe('The agent identifier'),
         model: z.string().describe('Model being called (e.g. claude-sonnet-4-6, gpt-4o, text-embedding-3-small)'),
@@ -62,7 +62,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'set_envelope',
     {
-      description: 'Create or update a spend envelope for an agent.',
+      description: 'Create or update a per-agent USD spend envelope. Idempotent: re-calling preserves the running spent_usd and reset_at; only limit_usd and window are overwritten. `window:"daily"` resets at UTC midnight; `window:"session"` never resets (caller-managed). Must be set before `budget_clear` will approve calls for this agent — clearance against an unset envelope returns approved:false. Spend is updated by `budget_clear` (estimated) and `reconcile` (corrected).',
       inputSchema: {
         agent_id: z.string().max(128).describe('The agent identifier'),
         limit_usd: z.number().finite().positive().max(1_000_000).describe('Spend limit in USD'),
@@ -91,7 +91,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'get_balance',
     {
-      description: 'Get the current credit balance for this account.',
+      description: 'Read-only snapshot of the account-level credit balance in USD. Balance is increased by topups and decreased by `budget_clear` (estimated cost at clearance time) and `reconcile` (drift correction). Per-agent spend caps are separate — see `set_envelope`. Returns {balance_usd:number}.',
       inputSchema: {},
       annotations: {
         title: 'Get account credit balance',
@@ -110,7 +110,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'reconcile',
     {
-      description: 'Reconcile a previous budget_clear with actual usage from the LLM response. Applies the drift (actual minus estimated cost) to the agent envelope and account balance.',
+      description: 'Post-call drift correction. After the LLM returns, call this with the actual input/output token counts from the provider response — applies the delta (actual minus estimated cost) to the agent envelope and account balance. Pairs with `budget_clear`: clear runs the estimate, reconcile runs the correction. If reconcile is skipped, the estimated cost stands. Not idempotent — calling twice double-corrects; gate with `idempotency_check` if your retry policy requires it.',
       inputSchema: {
         agent_id: z.string().max(128).describe('The agent identifier'),
         actual_input_tokens: z.number().int().finite().nonnegative().describe('Actual input tokens reported by the LLM provider'),
@@ -133,7 +133,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'set_rate_envelope',
     {
-      description: 'Create or update a rate-limit envelope for an (agent, provider, model) triple. Each envelope tracks requests per fixed 60-second window.',
+      description: 'Create or update a rate-limit envelope scoped to the (agent_id, provider, model) triple. Each triple gets its own independent counter — different agents on the same model do not share quota. Fixed 60-second window (not sliding). Idempotent: re-calling updates requests_per_minute without resetting the current window counter. Must be set before `rate_check` can return allowed:true for this triple — checks against an unset envelope return allowed:false.',
       inputSchema: {
         agent_id: z.string().max(128).describe('The agent identifier'),
         provider: z.string().max(64).describe('Provider name, e.g. anthropic, openai, bedrock'),
@@ -157,7 +157,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'rate_check',
     {
-      description: 'Check whether an agent is allowed to make a call against the rate envelope for the given (provider, model). Increments the counter on allow.',
+      description: 'Check the rate-limit envelope for an (agent_id, provider, model) triple before making an LLM call. Returns {allowed:true, requests_remaining_this_minute} if under cap (and increments the counter), or {allowed:false, retry_after_seconds} if over. Pairs with `set_rate_envelope` (which must be called first) and typically follows `budget_clear` in the request prologue: clear → rate_check → LLM call → reconcile. Not idempotent — each call counts as one request.',
       inputSchema: {
         agent_id: z.string().max(128).describe('The agent identifier'),
         provider: z.string().max(64).describe('Provider name, e.g. anthropic, openai'),
@@ -180,7 +180,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'idempotency_check',
     {
-      description: 'Dedupe retries on a caller-supplied key. Returns is_first_call=true the first time a key is seen, false on subsequent calls within TTL. Use to prevent double-charges, double-emails, or double-side-effects from agent retry loops.',
+      description: 'Dedupe retries on a caller-supplied key. Returns {is_first_call:true} the first time a key is seen within TTL; returns {is_first_call:false} on every subsequent call. Use as a guard around non-idempotent operations — common pairings: gate `reconcile` to prevent double-correction, gate `request_approval` to prevent duplicate human notifications, gate side-effectful tool calls (emails, payments, writes) to survive agent retry loops. Keys are account-scoped; choose keys that uniquely identify the logical operation, not the attempt.',
       inputSchema: {
         key: z.string().min(1).max(256).describe('Idempotency key — unique per logical operation'),
         ttl_seconds: z.number().int().finite().positive().max(MAX_TTL_SECONDS).optional().describe('Time-to-live in seconds (default 3600, max 30 days)'),
@@ -202,7 +202,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'request_approval',
     {
-      description: 'Request human approval for an agent action. Returns immediately with an approval_id and approval_url; the human approves or denies on a web page, and the agent polls check_approval to learn the decision. Notifies the account holder via the configured channel (V1: email only; telegram/sms accepted in schema but rejected with channel_not_implemented). NOT idempotent — retries create duplicate approvals; gate with idempotency_check if needed.',
+      description: 'Request human approval for an agent action. Returns immediately with {approval_id, approval_url, expires_at}; the human approves or denies via the URL (mobile-first web page), and the agent polls `check_approval` with approval_id to learn the decision. Notifies the account holder via the configured channel (V1: email only; telegram/sms accepted in schema but rejected with channel_not_implemented; email delivery may be silently skipped when no provider is configured server-side). NOT idempotent — each call creates a new pending approval and a new notification; gate with `idempotency_check` if your retry policy could fire twice for the same logical action.',
       inputSchema: {
         agent_id: z.string().min(1).max(MAX_AGENT_ID_CHARS).describe('Agent identifier requesting approval'),
         action_summary: z.string().min(1).max(MAX_ACTION_SUMMARY_CHARS).describe('Human-readable description of the action awaiting approval (≤280 chars)'),
@@ -226,7 +226,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'check_approval',
     {
-      description: 'Poll the status of a pending approval. Returns decision: "pending" while the human has not decided, "approved" or "denied" once they have, or "timeout" if expires_at has passed without a decision.',
+      description: 'Poll the status of a pending approval created by `request_approval`. Returns {decision: "pending"} while the human has not decided, {decision: "approved"} or {decision: "denied"} once they have, or {decision: "timeout"} if expires_at passed without a decision. Read-only and idempotent — safe to call repeatedly. Suggested poll interval: ≥5s. The human-facing approval page is at the approval_url returned by request_approval.',
       inputSchema: {
         approval_id: z.string().min(1).max(64).describe('approval_id returned by request_approval'),
       },
