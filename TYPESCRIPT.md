@@ -19,10 +19,11 @@ The clear → call → reconcile loop is plain `Authorization: Bearer`:
 ```typescript
 import type { paths } from './types/gvnr';
 
-type ClearReq = paths['/v1/budget/clear']['post']['requestBody']['content']['application/json'];
+// openapi-typescript marks requestBody optional; unwrap with NonNullable
+type ClearReq = NonNullable<paths['/v1/budget/clear']['post']['requestBody']>['content']['application/json'];
 type ClearRes = paths['/v1/budget/clear']['post']['responses']['200']['content']['application/json'];
 
-const API_KEY = process.env.GVNR_API_KEY!; // bg_... from POST /v1/account
+const API_KEY = 'bg_...'; // from POST /v1/account; load from your env
 
 async function clear(input: ClearReq): Promise<ClearRes> {
   const res = await fetch('https://gvnr.dev/v1/budget/clear', {
@@ -33,10 +34,13 @@ async function clear(input: ClearReq): Promise<ClearRes> {
   return res.json();
 }
 
-const decision = await clear({ agent_id: 'planner-1', model: 'claude-sonnet-4-6', estimated_tokens: 2000 });
-if (!decision.approved) throw new Error(`gvnr denied: ${decision.reason}`);
-// ... call your LLM ...
-// then POST /v1/budget/reconcile with actual_input_tokens + actual_output_tokens
+async function main() {
+  const decision = await clear({ agent_id: 'planner-1', model: 'claude-sonnet-4-6', estimated_tokens: 2000 });
+  if (!decision.approved) throw new Error(`gvnr denied: ${decision.reason}`);
+  // ... call your LLM ...
+  // then POST /v1/budget/reconcile with actual_input_tokens + actual_output_tokens
+}
+main();
 ```
 
 The discriminant `approved: boolean` narrows `reason` to `'no_credits' | 'no_envelope' | 'envelope_exceeded'` only when `approved=false`.
@@ -49,13 +53,18 @@ The pack-payment endpoint (`/pay/:pack`) is x402-gated — return a `402 Payment
 import { wrapFetchWithPayment } from 'x402-fetch';
 import { privateKeyToAccount } from 'viem/accounts';
 
-const account = privateKeyToAccount(process.env.WALLET_PRIVATE_KEY as `0x${string}`);
-const payFetch = wrapFetchWithPayment(fetch, account);
+async function topUp() {
+  const PRIVATE_KEY = '0x...' as `0x${string}`; // load from your env
+  const API_KEY = 'bg_...';
 
-// One call — x402-fetch handles the 402 → pay → retry round-trip
-const res = await payFetch('https://gvnr.dev/pay/starter?api_key=' + API_KEY);
-const body = await res.json();
-// { balance_usd: 19, pack: 'starter', credited: 19 }
+  const account = privateKeyToAccount(PRIVATE_KEY);
+  const payFetch = wrapFetchWithPayment(fetch, account);
+
+  // One call — x402-fetch handles the 402 → pay → retry round-trip
+  const res = await payFetch(`https://gvnr.dev/pay/starter?api_key=${API_KEY}`);
+  const body = await res.json();
+  // { balance_usd: 19, pack: 'starter', credited: 19 }
+}
 ```
 
 For interactive topups (paste tx hash in browser), point users at `https://gvnr.dev/pay/starter?api_key=...` — no SDK needed.

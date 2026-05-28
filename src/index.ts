@@ -654,6 +654,30 @@ app.get('/openapi.json', (c) => {
           responses: { '200': { description: 'HTML confirmation page' } },
         },
       },
+      '/v1/account/topup/{pack}': {
+        post: {
+          summary: 'x402-gated machine credit top-up — pays on-chain via the x402 protocol and credits the account in one round-trip',
+          description: 'Returns 402 Payment Required with x402 headers if no payment is present. Pair with an x402 client (e.g. x402-fetch from Coinbase) which signs payment and re-requests automatically.',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'pack', in: 'path', required: true, schema: { type: 'string', enum: ['starter', 'growth', 'studio'] } }],
+          responses: {
+            '200': {
+              description: 'Payment verified, credits applied',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['balance_usd', 'pack', 'credited'],
+                properties: {
+                  balance_usd: { type: 'number', description: 'New account balance after credit' },
+                  pack: { type: 'string', enum: ['starter', 'growth', 'studio'] },
+                  credited: { type: 'number', description: 'USD amount credited from the pack' },
+                },
+              } } },
+            },
+            '402': { description: 'Payment Required — x402 headers contain the payment instructions (network, asset, amount, payto address)' },
+            default: { description: 'Error (invalid_pack, misconfigured_network)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
+        },
+      },
       '/v1/budget/envelope': {
         put: {
           summary: 'Create or update agent spend envelope',
