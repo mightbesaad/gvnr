@@ -38,4 +38,6 @@ export interface Env {
   ADMIN_SECRET: string;      // secret header value for admin endpoints
   BASE_RPC_FALLBACK_URL?: string; // optional fallback RPC if the primary chain RPC fails
   RESEND_API_KEY?: string;   // optional — outbound approval email via Resend
+  CDP_API_KEY_ID?: string;   // optional — Coinbase Developer Platform key ID for x402 mainnet facilitator
+  CDP_API_KEY_SECRET?: string; // optional — paired CDP key secret
 }

@@ -2,9 +2,10 @@ import { paymentMiddleware } from '@x402/hono';
 import { x402ResourceServer, HTTPFacilitatorClient } from '@x402/core/server';
 import type { RoutesConfig } from '@x402/core/server';
 import { ExactEvmScheme } from '@x402/evm/exact/server';
+import { createFacilitatorConfig } from '@coinbase/x402';
 import type { MiddlewareHandler } from 'hono';
 
-const FACILITATOR_URL = 'https://x402.org/facilitator';
+const FALLBACK_FACILITATOR_URL = 'https://x402.org/facilitator';
 
 export const PACKS = {
   starter: { amount_usd: 19, description: 'Starter — ~10k tool calls/month' },
@@ -19,9 +20,15 @@ let resourceServer: x402ResourceServer | null = null;
 let initPromise: Promise<void> | null = null;
 let innerMiddleware: MiddlewareHandler | null = null;
 
-function getResourceServer(): x402ResourceServer {
+function getResourceServer(cdpKeyId?: string, cdpKeySecret?: string): x402ResourceServer {
   if (!resourceServer) {
-    const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
+    // Prefer Coinbase CDP facilitator when keys are configured (supports Base mainnet
+    // eip155:8453). Fall back to the public x402.org facilitator (Sepolia-only) when
+    // keys are absent — useful for testnet development.
+    const facilitatorConfig = cdpKeyId && cdpKeySecret
+      ? createFacilitatorConfig(cdpKeyId, cdpKeySecret)
+      : { url: FALLBACK_FACILITATOR_URL };
+    const facilitatorClient = new HTTPFacilitatorClient(facilitatorConfig);
     resourceServer = new x402ResourceServer(facilitatorClient)
       .register('eip155:*', new ExactEvmScheme());
   }
@@ -44,8 +51,13 @@ function buildRoutes(payToAddress: string, network: string): RoutesConfig {
   return routes;
 }
 
-export function buildX402Middleware(payToAddress: string, network: string): MiddlewareHandler {
-  const server = getResourceServer();
+export function buildX402Middleware(
+  payToAddress: string,
+  network: string,
+  cdpKeyId?: string,
+  cdpKeySecret?: string,
+): MiddlewareHandler {
+  const server = getResourceServer(cdpKeyId, cdpKeySecret);
 
   if (!innerMiddleware) {
     innerMiddleware = paymentMiddleware(

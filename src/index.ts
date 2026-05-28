@@ -1354,7 +1354,12 @@ app.route('/b2b', b2bRoutes);
 // x402 payment gate — must run before account routes so topup/:pack sees payment verification.
 // Initialized lazily on first request so PAYTO_ADDRESS is available from env.
 app.use('/v1/account/topup/*', async (c, next) => {
-  const middleware = buildX402Middleware(c.env.PAYTO_ADDRESS, c.env.X402_NETWORK);
+  const middleware = buildX402Middleware(
+    c.env.PAYTO_ADDRESS,
+    c.env.X402_NETWORK,
+    c.env.CDP_API_KEY_ID,
+    c.env.CDP_API_KEY_SECRET,
+  );
   return middleware(c, next);
 });
 
