@@ -162,6 +162,8 @@ claude mcp add gvnr --transport http \
 
 All endpoints (except `POST /v1/account`) require `Authorization: Bearer bg_YOUR_KEY`.
 
+**TypeScript users:** generate full types from the live OpenAPI spec — `npx openapi-typescript@latest https://gvnr.dev/openapi.json -o types/gvnr.d.ts`. See [TYPESCRIPT.md](TYPESCRIPT.md) for the integration pattern (typed `fetch`, x402 topups, discriminated response unions).
+
 ### Account
 
 | Method | Path | Description |

@@ -8,6 +8,7 @@
 		"start": "wrangler dev",
 		"test": "vitest",
 		"cf-typegen": "wrangler types",
+		"gen-types": "npx openapi-typescript@latest https://gvnr.dev/openapi.json -o types/gvnr.d.ts",
 		"stress": "node scripts/stress-security.mjs"
 	},
 	"devDependencies": {

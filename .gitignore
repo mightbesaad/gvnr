@@ -165,3 +165,7 @@ dist
 .env*
 !.env.example
 .wrangler/
+
+# OpenAPI-generated types (regenerate via `npm run gen-types`)
+
+types/gvnr.d.ts

@@ -215,19 +215,62 @@ app.get('/openapi.json', (c) => {
       securitySchemes: {
         bearerAuth: { type: 'http', scheme: 'bearer', description: 'API key from POST /v1/account' },
       },
+      schemas: {
+        ErrorResponse: {
+          type: 'object',
+          required: ['error'],
+          properties: {
+            error: { type: 'string', description: 'Stable machine-readable error code (e.g. "invalid_params", "rate_limited", "not_found")' },
+            required: { type: 'array', items: { type: 'string' }, description: 'Names/descriptors of required fields when error is "invalid_params"' },
+            hint: { type: 'string', description: 'Human-readable guidance for resolving the error' },
+            detail: { type: 'string', description: 'Additional context for the error' },
+            valid: { type: 'array', items: { type: 'string' }, description: 'Allowed values when input was rejected as out-of-set' },
+            valid_channels: { type: 'array', items: { type: 'string' }, description: 'Allowed notification channels (for approval requests)' },
+            retry_after: { type: 'string', description: 'Soft retry hint (e.g. "next_minute", "next_hour")' },
+            limit: { type: 'string', description: 'Description of the limit that was hit' },
+          },
+        },
+      },
     },
     paths: {
       '/v1/account': {
         post: {
           summary: 'Provision account',
-          responses: { '200': { description: 'Returns api_key and account_id' } },
+          responses: {
+            '201': {
+              description: 'Account created — returns api_key (use as Bearer token) and account_id',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['api_key', 'account_id'],
+                properties: {
+                  api_key: { type: 'string', description: 'Bearer token for subsequent requests; format `bg_...`' },
+                  account_id: { type: 'string', description: 'Stable account identifier' },
+                },
+              } } },
+            },
+            '429': {
+              description: 'Rate limited (account provisioning is per-IP capped)',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } },
+            },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/account/balance': {
         get: {
           summary: 'Get credit balance',
           security: [{ bearerAuth: [] }],
-          responses: { '200': { description: 'Returns balance_usd' } },
+          responses: {
+            '200': {
+              description: 'Current account-level credit balance in USD',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['balance_usd'],
+                properties: { balance_usd: { type: 'number', description: 'Current credit balance in USD' } },
+              } } },
+            },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/account/topup-verify/{pack}': {
@@ -235,32 +278,118 @@ app.get('/openapi.json', (c) => {
           summary: 'Verify on-chain USDC payment and credit account',
           security: [{ bearerAuth: [] }],
           parameters: [{ name: 'pack', in: 'path', required: true, schema: { type: 'string', enum: ['starter', 'growth', 'studio'] } }],
-          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { tx_hash: { type: 'string' } }, required: ['tx_hash'] } } } },
-          responses: { '200': { description: 'Credits added, returns balance_usd' } },
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { tx_hash: { type: 'string', description: 'Base mainnet USDC transaction hash (0x-prefixed, 64 hex chars)' } }, required: ['tx_hash'] } } } },
+          responses: {
+            '200': {
+              description: 'Credits applied (or already_credited=true if tx was previously verified)',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['balance_usd', 'pack', 'credited'],
+                properties: {
+                  balance_usd: { type: 'number', description: 'New account balance after credit' },
+                  pack: { type: 'string', enum: ['starter', 'growth', 'studio'] },
+                  credited: { type: 'number', description: 'USD amount credited from the pack' },
+                  already_credited: { type: 'boolean', description: 'True if this tx_hash was previously verified (idempotent replay)' },
+                },
+              } } },
+            },
+            default: { description: 'Error (invalid_pack, invalid_tx_hash, misconfigured_network, on-chain verification failure)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/budget/clear': {
         post: {
           summary: 'Clearance call — approve or deny agent spend',
           security: [{ bearerAuth: [] }],
-          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, model: { type: 'string' }, estimated_tokens: { type: 'integer' } }, required: ['agent_id', 'model', 'estimated_tokens'] } } } },
-          responses: { '200': { description: 'Returns approved (bool), remaining_usd, optional reason' } },
+          requestBody: { content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['agent_id', 'model', 'estimated_tokens'],
+            properties: {
+              agent_id: { type: 'string', maxLength: 128, description: 'Agent identifier (must have a spend envelope set via PUT /v1/budget/envelope)' },
+              model: { type: 'string', description: 'Provider model identifier (e.g. claude-sonnet-4-6, gpt-4o, text-embedding-3-small)' },
+              estimated_tokens: { type: 'integer', minimum: 1, description: 'Output tokens for chat models, input tokens for embedding/input-only models' },
+            },
+          } } } },
+          responses: {
+            '200': {
+              description: 'Clearance result — always 200; check `approved` field',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['approved', 'remaining_usd'],
+                properties: {
+                  approved: { type: 'boolean', description: 'True if the call is authorized; false if denied' },
+                  remaining_usd: { type: 'number', description: 'USD remaining on the agent envelope after this clearance (0 if denied for no_credits/no_envelope)' },
+                  reason: { type: 'string', enum: ['no_credits', 'no_envelope', 'envelope_exceeded'], description: 'Present only when approved=false' },
+                },
+              } } },
+            },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/budget/reconcile': {
         post: {
           summary: 'Reconcile a prior clearance with actual LLM usage; applies drift to envelope and balance',
           security: [{ bearerAuth: [] }],
-          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, actual_input_tokens: { type: 'integer', minimum: 0 }, actual_output_tokens: { type: 'integer', minimum: 0 } }, required: ['agent_id', 'actual_input_tokens', 'actual_output_tokens'] } } } },
-          responses: { '200': { description: 'Returns drift_usd, remaining_usd, balance_usd, optional warning' } },
+          requestBody: { content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['agent_id', 'actual_input_tokens', 'actual_output_tokens'],
+            properties: {
+              agent_id: { type: 'string', maxLength: 128 },
+              actual_input_tokens: { type: 'integer', minimum: 0, description: 'Actual input tokens reported by the provider' },
+              actual_output_tokens: { type: 'integer', minimum: 0, description: 'Actual output tokens reported by the provider' },
+            },
+          } } } },
+          responses: {
+            '200': {
+              description: 'Drift applied — envelope and balance corrected by (actual − estimated). warning="drift_exceeds_2x_threshold" when actual cost was >2× the estimate',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['ok', 'drift_usd', 'remaining_usd', 'balance_usd'],
+                properties: {
+                  ok: { type: 'boolean', description: 'Always true on 200; false outcomes return 400' },
+                  drift_usd: { type: 'number', description: 'Signed: positive if actual > estimated (more debited), negative if actual < estimated (credit returned)' },
+                  remaining_usd: { type: 'number', description: 'USD remaining on the agent envelope after drift applied' },
+                  balance_usd: { type: 'number', description: 'New account-level balance after drift applied' },
+                  warning: { type: 'string', enum: ['drift_exceeds_2x_threshold'] },
+                },
+              } } },
+            },
+            default: { description: 'Error (no_envelope, no_pending_clearance, invalid_params)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/rate/envelope': {
         put: {
           summary: 'Create or update a rate-limit envelope per (agent, provider, model)',
           security: [{ bearerAuth: [] }],
-          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' }, requests_per_minute: { type: 'integer', minimum: 1 } }, required: ['agent_id', 'provider', 'model', 'requests_per_minute'] } } } },
-          responses: { '200': { description: 'Envelope created or updated' } },
+          requestBody: { content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['agent_id', 'provider', 'model', 'requests_per_minute'],
+            properties: {
+              agent_id: { type: 'string', maxLength: 128 },
+              provider: { type: 'string', maxLength: 64, description: 'Informational, e.g. "anthropic", "openai", "bedrock"' },
+              model: { type: 'string', maxLength: 128, description: 'Model identifier, e.g. "claude-sonnet-4-6"' },
+              requests_per_minute: { type: 'integer', minimum: 1, maximum: 1000000, description: 'Cap per fixed 60-second window (not sliding)' },
+            },
+          } } } },
+          responses: {
+            '200': {
+              description: 'Envelope created or updated',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['success', 'agent_id', 'provider', 'model', 'requests_per_minute'],
+                properties: {
+                  success: { type: 'boolean', enum: [true] },
+                  agent_id: { type: 'string' },
+                  provider: { type: 'string' },
+                  model: { type: 'string' },
+                  requests_per_minute: { type: 'integer' },
+                },
+              } } },
+            },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/rate/envelope/{agent_id}/{provider}/{model}': {
@@ -272,7 +401,25 @@ app.get('/openapi.json', (c) => {
             { name: 'provider', in: 'path', required: true, schema: { type: 'string' } },
             { name: 'model', in: 'path', required: true, schema: { type: 'string' } },
           ],
-          responses: { '200': { description: 'Returns rate envelope record' } },
+          responses: {
+            '200': {
+              description: 'Current rate envelope record with live window state',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['agent_id', 'provider', 'model', 'requests_per_minute', 'requests_in_window', 'window_start'],
+                properties: {
+                  agent_id: { type: 'string' },
+                  provider: { type: 'string' },
+                  model: { type: 'string' },
+                  requests_per_minute: { type: 'integer' },
+                  requests_in_window: { type: 'integer', description: 'Count consumed in the current 60s window' },
+                  window_start: { type: 'integer', description: 'Unix ms when the current window opened' },
+                },
+              } } },
+            },
+            '404': { description: 'Envelope not found for this triple', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
         delete: {
           summary: 'Delete a rate envelope',
@@ -282,49 +429,186 @@ app.get('/openapi.json', (c) => {
             { name: 'provider', in: 'path', required: true, schema: { type: 'string' } },
             { name: 'model', in: 'path', required: true, schema: { type: 'string' } },
           ],
-          responses: { '200': { description: 'Envelope deleted' } },
+          responses: {
+            '200': {
+              description: 'Envelope deleted',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['success', 'agent_id', 'provider', 'model'],
+                properties: {
+                  success: { type: 'boolean', enum: [true] },
+                  agent_id: { type: 'string' },
+                  provider: { type: 'string' },
+                  model: { type: 'string' },
+                },
+              } } },
+            },
+            '404': { description: 'Envelope not found for this triple', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/rate/check': {
         post: {
           summary: 'Runtime rate check — returns allowed=true with remaining count, or allowed=false with retry_after_ms',
           security: [{ bearerAuth: [] }],
-          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' } }, required: ['agent_id', 'provider', 'model'] } } } },
-          responses: { '200': { description: 'Returns allowed (bool), reason or requests_remaining_this_minute, optional retry_after_ms' } },
+          requestBody: { content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['agent_id', 'provider', 'model'],
+            properties: {
+              agent_id: { type: 'string', maxLength: 128 },
+              provider: { type: 'string' },
+              model: { type: 'string' },
+            },
+          } } } },
+          responses: {
+            '200': {
+              description: 'Rate check result — always 200; check `allowed` field. On allow, the counter is incremented as a side effect',
+              content: { 'application/json': { schema: {
+                oneOf: [
+                  {
+                    type: 'object',
+                    required: ['allowed', 'requests_remaining_this_minute'],
+                    properties: {
+                      allowed: { type: 'boolean', enum: [true] },
+                      requests_remaining_this_minute: { type: 'integer', description: 'Capacity left after counting this request' },
+                    },
+                  },
+                  {
+                    type: 'object',
+                    required: ['allowed', 'reason'],
+                    properties: {
+                      allowed: { type: 'boolean', enum: [false] },
+                      reason: { type: 'string', enum: ['no_rate_envelope', 'rate_exceeded'] },
+                      retry_after_ms: { type: 'integer', description: 'Present only when reason="rate_exceeded"; ms until window resets' },
+                    },
+                  },
+                ],
+              } } },
+            },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/idempotency/check': {
         post: {
           summary: 'Dedupe retries on a caller-supplied key — first call stores it, subsequent calls within TTL return is_first_call=false',
           security: [{ bearerAuth: [] }],
-          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { key: { type: 'string', minLength: 1, maxLength: 256 }, ttl_seconds: { type: 'integer', minimum: 1, maximum: 2592000 } }, required: ['key'] } } } },
-          responses: { '200': { description: 'Returns is_first_call (bool), ttl_remaining_seconds (int)' } },
+          requestBody: { content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['key'],
+            properties: {
+              key: { type: 'string', minLength: 1, maxLength: 256, description: 'Account-scoped idempotency key' },
+              ttl_seconds: { type: 'integer', minimum: 1, maximum: 2592000, description: 'TTL for the key (default 3600, max 30 days)' },
+            },
+          } } } },
+          responses: {
+            '200': {
+              description: 'Check-and-set result',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['is_first_call', 'ttl_remaining_seconds'],
+                properties: {
+                  is_first_call: { type: 'boolean', description: 'True on first observation of this key within TTL; false on replay' },
+                  ttl_remaining_seconds: { type: 'integer', description: 'Seconds left before this key expires from the dedup store' },
+                },
+              } } },
+            },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/account/notification-email': {
         get: {
           summary: 'Get the configured notification email (used by request_approval)',
           security: [{ bearerAuth: [] }],
-          responses: { '200': { description: 'Returns notification_email (string|null)' } },
+          responses: {
+            '200': {
+              description: 'Returns the configured email (null if unset)',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['notification_email'],
+                properties: {
+                  notification_email: { type: ['string', 'null'], format: 'email' },
+                },
+              } } },
+            },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
         post: {
           summary: 'Set the email Gvnr notifies when request_approval fires',
           security: [{ bearerAuth: [] }],
           requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { email: { type: 'string', format: 'email' } }, required: ['email'] } } } },
-          responses: { '200': { description: 'Returns ok and the stored notification_email' } },
+          responses: {
+            '200': {
+              description: 'Email stored',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['ok', 'notification_email'],
+                properties: {
+                  ok: { type: 'boolean', enum: [true] },
+                  notification_email: { type: 'string', format: 'email' },
+                },
+              } } },
+            },
+            default: { description: 'Error (invalid_email)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
         delete: {
           summary: 'Clear the configured notification email (right-to-erasure)',
           security: [{ bearerAuth: [] }],
-          responses: { '200': { description: 'Returns ok' } },
+          responses: {
+            '200': {
+              description: 'Email cleared (or was already unset — idempotent)',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['ok'],
+                properties: { ok: { type: 'boolean', enum: [true] } },
+              } } },
+            },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/approval/request': {
         post: {
           summary: 'Create an approval request — returns approval_id, approval_url, expires_at',
           security: [{ bearerAuth: [] }],
-          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string', maxLength: 128 }, action_summary: { type: 'string', maxLength: 280 }, ttl_seconds: { type: 'integer', minimum: 30, maximum: 604800 }, channels: { type: 'array', items: { type: 'string', enum: ['email', 'telegram', 'sms'] } } }, required: ['agent_id', 'action_summary'] } } } },
-          responses: { '200': { description: 'Returns approval_id, approval_url, expires_at, notification status' } },
+          requestBody: { content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['agent_id', 'action_summary'],
+            properties: {
+              agent_id: { type: 'string', maxLength: 128 },
+              action_summary: { type: 'string', maxLength: 280, description: 'Human-readable description of what needs approval' },
+              ttl_seconds: { type: 'integer', minimum: 1, maximum: 604800, description: 'How long the approver has to decide (default 600s, max 7 days)' },
+              channels: { type: 'array', items: { type: 'string', enum: ['email', 'telegram', 'sms'] }, description: 'Notification channels (default ["email"]; telegram/sms accepted in schema but rejected with channel_not_implemented in V1)' },
+            },
+          } } } },
+          responses: {
+            '200': {
+              description: 'Approval created; notification dispatched per channel',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['approval_id', 'approval_url', 'expires_at', 'notification'],
+                properties: {
+                  approval_id: { type: 'string', description: 'Opaque ID; pass to GET /v1/approval/check/{approval_id} to poll' },
+                  approval_url: { type: 'string', format: 'uri', description: 'Mobile-first approval page URL to send to the human' },
+                  expires_at: { type: 'integer', description: 'Unix ms when the approval window closes' },
+                  notification: {
+                    type: 'object',
+                    required: ['email'],
+                    properties: {
+                      email: { type: 'string', description: 'Dispatch status: "sent" | "no_address" | "skipped_no_key" | "failed"' },
+                      error: { type: 'string', description: 'Failure detail when status="failed"' },
+                    },
+                  },
+                },
+              } } },
+            },
+            '429': { description: 'Rate limited (30 request_approval calls per minute per account)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            default: { description: 'Error (invalid_agent_id, invalid_action_summary, invalid_ttl_seconds, invalid_channels, channel_not_implemented, notification_email_unset)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/approval/check/{approval_id}': {
@@ -332,7 +616,27 @@ app.get('/openapi.json', (c) => {
           summary: 'Poll the status of an approval request',
           security: [{ bearerAuth: [] }],
           parameters: [{ name: 'approval_id', in: 'path', required: true, schema: { type: 'string' } }],
-          responses: { '200': { description: 'Returns decision (pending/approved/denied/timeout) and metadata' } },
+          responses: {
+            '200': {
+              description: 'Current approval state',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['approval_id', 'decision', 'agent_id', 'action_summary', 'created_at', 'expires_at'],
+                properties: {
+                  approval_id: { type: 'string' },
+                  decision: { type: 'string', enum: ['pending', 'approved', 'denied', 'timeout'] },
+                  agent_id: { type: 'string' },
+                  action_summary: { type: 'string' },
+                  created_at: { type: 'integer', description: 'Unix ms' },
+                  expires_at: { type: 'integer', description: 'Unix ms' },
+                  responder: { type: 'string', description: 'Present when decision is approved or denied' },
+                  decided_at: { type: 'integer', description: 'Unix ms when the human decided (approved/denied only)' },
+                },
+              } } },
+            },
+            '404': { description: 'approval_not_found (wrong account, wrong id, or storage TTL elapsed past grace window)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/approve/{approval_id}': {
@@ -354,8 +658,31 @@ app.get('/openapi.json', (c) => {
         put: {
           summary: 'Create or update agent spend envelope',
           security: [{ bearerAuth: [] }],
-          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { agent_id: { type: 'string' }, limit_usd: { type: 'number' }, window: { type: 'string', enum: ['daily', 'session'] } }, required: ['agent_id', 'limit_usd'] } } } },
-          responses: { '200': { description: 'Envelope created or updated' } },
+          requestBody: { content: { 'application/json': { schema: {
+            type: 'object',
+            required: ['agent_id', 'limit_usd'],
+            properties: {
+              agent_id: { type: 'string', maxLength: 128 },
+              limit_usd: { type: 'number', minimum: 0.000001, maximum: 1000000, description: 'Spend cap in USD over the window' },
+              window: { type: 'string', enum: ['daily', 'session'], description: 'daily=resets at UTC midnight; session=never resets (caller-managed). Default: daily' },
+            },
+          } } } },
+          responses: {
+            '200': {
+              description: 'Envelope created or updated (running spent_usd and reset_at preserved on update)',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['success', 'agent_id', 'limit_usd', 'window'],
+                properties: {
+                  success: { type: 'boolean', enum: [true] },
+                  agent_id: { type: 'string' },
+                  limit_usd: { type: 'number' },
+                  window: { type: 'string', enum: ['daily', 'session'] },
+                },
+              } } },
+            },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/budget/envelope/{agent_id}': {
@@ -363,22 +690,82 @@ app.get('/openapi.json', (c) => {
           summary: 'Read envelope state',
           security: [{ bearerAuth: [] }],
           parameters: [{ name: 'agent_id', in: 'path', required: true, schema: { type: 'string' } }],
-          responses: { '200': { description: 'Returns envelope record' } },
+          responses: {
+            '200': {
+              description: 'Current envelope record',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['agent_id', 'limit_usd', 'spent_usd', 'remaining_usd', 'window', 'reset_at'],
+                properties: {
+                  agent_id: { type: 'string' },
+                  limit_usd: { type: 'number' },
+                  spent_usd: { type: 'number', description: 'Cumulative spend in the current window' },
+                  remaining_usd: { type: 'number', description: 'Always max(0, limit − spent)' },
+                  window: { type: 'string', enum: ['daily', 'session'] },
+                  reset_at: { type: 'integer', description: 'Unix ms when the daily window next resets (informational for session)' },
+                },
+              } } },
+            },
+            '404': { description: 'Envelope not found for this agent_id', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
+        },
+        delete: {
+          summary: 'Delete an agent envelope',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'agent_id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': {
+              description: 'Envelope deleted',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['success', 'agent_id'],
+                properties: {
+                  success: { type: 'boolean', enum: [true] },
+                  agent_id: { type: 'string' },
+                },
+              } } },
+            },
+            '404': { description: 'Envelope not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/packs/{pack}/info': {
         get: {
           summary: 'Get pack details and payment info',
           parameters: [{ name: 'pack', in: 'path', required: true, schema: { type: 'string', enum: ['starter', 'growth', 'studio'] } }],
-          responses: { '200': { description: 'Returns amount, USDC address, raw amount' } },
+          responses: {
+            '200': {
+              description: 'Pack pricing + receiving wallet for direct USDC send',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['pack', 'amount_usd', 'description', 'network_name', 'chain_id', 'usdc_contract', 'usdc_amount_raw', 'payto_address'],
+                properties: {
+                  pack: { type: 'string', enum: ['starter', 'growth', 'studio'] },
+                  amount_usd: { type: 'number' },
+                  description: { type: 'string' },
+                  network_name: { type: 'string', description: 'Human-readable chain name (e.g. "Base mainnet")' },
+                  chain_id: { type: 'integer', description: 'EVM chain ID (8453 for Base, 84532 for Base Sepolia)' },
+                  usdc_contract: { type: 'string', description: 'USDC contract address on this chain' },
+                  usdc_amount_raw: { type: 'string', description: 'Amount in USDC base units (string to preserve precision)' },
+                  payto_address: { type: 'string', description: 'Address to send USDC to; pair with POST /v1/account/topup-verify/{pack}' },
+                },
+              } } },
+            },
+            default: { description: 'Error (invalid_pack, misconfigured_network)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/mcp': {
         post: {
           summary: 'MCP server endpoint (Streamable HTTP)',
           security: [{ bearerAuth: [] }],
-          description: 'Pass api_key as query param or Authorization: Bearer header',
-          responses: { '200': { description: 'MCP JSON-RPC response' } },
+          description: 'Pass api_key as query param or Authorization: Bearer header. Body and response are JSON-RPC 2.0 envelopes per the MCP spec (tools/list, tools/call, etc.); shapes are opaque to this OpenAPI definition.',
+          responses: {
+            '200': { description: 'MCP JSON-RPC response', content: { 'application/json': { schema: { type: 'object', description: 'JSON-RPC 2.0 envelope; see modelcontextprotocol.io for shape' } } } },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
     },
