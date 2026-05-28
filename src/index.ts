@@ -1228,7 +1228,7 @@ gemini-embedding-2      $0.20 / M   (input-only)</pre>
 
     <footer>
       <div class="footer-row">
-        <span>USDC receiver: <span class="footer-mono">0xBcF326ff22CDEc10Ca4F8AE9415Bb6884a0c26D3</span></span>
+        <span>USDC receiver: <span class="footer-mono">${c.env.PAYTO_ADDRESS}</span></span>
         <span>·</span>
         <span>Network: Base mainnet (eip155:8453)</span>
         <span>·</span>
