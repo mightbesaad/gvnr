@@ -1,6 +1,6 @@
 import { env, SELF } from 'cloudflare:test';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { parseTopupUsd, MIN_TOPUP_USD, MAX_TOPUP_USD } from '../src/lib/x402';
+import { parseTopupUsd, MIN_TOPUP_USD, MAX_TOPUP_USD, shouldCreditAfterSettle, type TopupIntent } from '../src/lib/x402';
 
 // ── RPC mock helpers ─────────────────────────────────────────────────────────
 
@@ -253,6 +253,58 @@ describe('parseTopupUsd (canonicalizer — single source for challenge price + c
     expect(parseTopupUsd('abc')).toMatchObject({ ok: false, error: 'invalid_amount' });
     expect(parseTopupUsd('-5')).toMatchObject({ ok: false, error: 'invalid_amount' });
     expect(parseTopupUsd(['5', '7'])).toMatchObject({ ok: false, error: 'invalid_amount' });
+  });
+});
+
+describe('shouldCreditAfterSettle (settle-contingent credit rule)', () => {
+  // This is the core safety rule for the x402 topup path: credit ops ONLY when the handler
+  // stashed an intent (payment verified, handler ran) AND the final response is a success
+  // (settlement did not overwrite it with a 402). A real signed-payment settle-fail can't be
+  // reproduced in this harness, so the four branches are asserted directly on the rule.
+  const intent: TopupIntent = { accountId: 'acct_x', ops: 5000, body: { credited_ops: 5000 } };
+
+  it('credits on verified + settlement success (intent present, status 200)', () => {
+    expect(shouldCreditAfterSettle(intent, 200)).toBe(true);
+  });
+
+  it('does NOT credit when settlement fails (intent present, status 402)', () => {
+    expect(shouldCreditAfterSettle(intent, 402)).toBe(false);
+  });
+
+  it('does NOT credit when the handler itself errored (intent present, status >= 400)', () => {
+    expect(shouldCreditAfterSettle(intent, 400)).toBe(false);
+    expect(shouldCreditAfterSettle(intent, 500)).toBe(false);
+  });
+
+  it('does NOT credit when no intent was stashed (unpaid — handler never ran)', () => {
+    expect(shouldCreditAfterSettle(undefined, 200)).toBe(false);
+    expect(shouldCreditAfterSettle(undefined, 402)).toBe(false);
+  });
+});
+
+describe('x402 topup never credits speculatively (no payment -> no ops)', () => {
+  // End-to-end proof through the real gate + wrapper that an unpaid topup returns 402 and leaves
+  // the quota untouched — i.e. crediting is not happening at verify time on either x402 path.
+  it('pay-as-you-go (?usd=) 402s and credits zero ops', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup?usd=5', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(res.status).toBe(402);
+    const balance = await SELF.fetch(`http://localhost/v1/account/balance?api_key=${apiKey}`);
+    expect(await balance.json()).toEqual({ operations_remaining: 0 });
+  });
+
+  it('preset pack 402s and credits zero ops', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(res.status).toBe(402);
+    const balance = await SELF.fetch(`http://localhost/v1/account/balance?api_key=${apiKey}`);
+    expect(await balance.json()).toEqual({ operations_remaining: 0 });
   });
 });
 

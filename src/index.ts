@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Context, Next } from 'hono';
 import type { Env } from './lib/types';
-import { buildX402Middleware, parseTopupUsd } from './lib/x402';
+import { buildX402Middleware, parseTopupUsd, shouldCreditAfterSettle, type TopupIntent } from './lib/x402';
 import { mcpHandler } from './routes/mcp';
 import accountRoutes from './routes/account';
 import envelopeRoutes from './routes/envelope';
@@ -17,7 +17,9 @@ import { getAccount } from './lib/kv';
 import { renderPriceTable } from './lib/models';
 export { AccountState } from './lib/account-do';
 
-const app = new Hono<{ Bindings: Env }>();
+type AppVars = { Bindings: Env; Variables: { topupIntent?: TopupIntent } };
+
+const app = new Hono<AppVars>();
 
 app.onError((err, c) => {
   if (err instanceof SyntaxError) {
@@ -1375,7 +1377,7 @@ app.route('/b2b', b2bRoutes);
 
 // x402 payment gate — must run before account routes so topup sees payment verification.
 // Initialized lazily on first request so PAYTO_ADDRESS is available from env.
-const x402Gate = async (c: Context<{ Bindings: Env }>, next: Next) => {
+const x402Gate = async (c: Context<AppVars>, next: Next) => {
   const middleware = buildX402Middleware(
     c.env.PAYTO_ADDRESS,
     c.env.X402_NETWORK,
@@ -1385,20 +1387,88 @@ const x402Gate = async (c: Context<{ Bindings: Env }>, next: Next) => {
   return middleware(c, next);
 };
 
-// Preset packs (POST /v1/account/topup/:pack) — fixed amounts, gated directly. Use a required
-// :pack segment (NOT /*) so this gate does NOT also match the bare pay-as-you-go path below —
-// otherwise it would intercept and 402 before the bare-path amount validation could run.
-app.use('/v1/account/topup/:pack', x402Gate);
+// Replace the response body with JSON while preserving the headers the x402 middleware set on
+// settlement success (notably X-PAYMENT-RESPONSE). Drops content-length so the runtime recomputes
+// it for the new body, and keeps the existing status (200 on success).
+function rewriteJson(c: Context<AppVars>, body: unknown): void {
+  const headers = new Headers(c.res.headers);
+  headers.delete('content-length');
+  headers.set('content-type', 'application/json');
+  c.res = new Response(JSON.stringify(body), { status: c.res.status, headers });
+}
+
+// Credit ops AFTER on-chain settlement. The topup handlers stash a TopupIntent and return a
+// provisional 2xx; the x402 middleware then settles and either leaves that 2xx (success) or
+// overwrites it with a 402 (settle failure). We run after the gate and credit only when an
+// intent was stashed AND the final response is a success — never speculatively at verify time.
+async function creditAfterSettle(c: Context<AppVars>): Promise<void> {
+  const intent = c.get('topupIntent');
+  if (!shouldCreditAfterSettle(intent, c.res.status)) return;
+
+  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(intent.accountId));
+  try {
+    const { operations_remaining } = await stub.credit(intent.ops);
+    rewriteJson(c, { ...intent.body, operations_remaining });
+  } catch (err) {
+    // Settlement succeeded (funds received) but the DO credit failed — the customer is OWED ops,
+    // gvnr is not out money (correct failure direction). The user-facing hint below promises
+    // manual crediting, so we MUST leave a durable record to reconcile from: console.error alone
+    // is not enough (the tail worker forwards only crashes/5xx, and Observability caps at 3 days).
+    // Write a no-TTL KV record (keyed by time + account) that persists until reconciled, and
+    // return 200 with an honest credit_status so a well-behaved x402 client does NOT re-pay
+    // (its payment authorization is already spent — a retry would double-charge).
+    const failure = {
+      event: 'topup_credit_failed_post_settle',
+      account_id: intent.accountId,
+      ops: intent.ops,
+      ...intent.body,
+      at: new Date().toISOString(),
+      error: String(err),
+    };
+    console.error(JSON.stringify(failure));
+    try {
+      await c.env.BUDGET_KV.put(
+        `topup_credit_failed:${Date.now()}:${intent.accountId}`,
+        JSON.stringify(failure),
+      );
+    } catch (kvErr) {
+      // KV also failed — nothing more we can do durably; the console.error above is the last record.
+      console.error(JSON.stringify({ event: 'topup_credit_failure_record_failed', error: String(kvErr) }));
+    }
+    rewriteJson(c, {
+      ...intent.body,
+      operations_remaining: null,
+      credit_status: 'pending_manual',
+      hint: 'Payment settled on-chain but crediting hit an internal error. Your ops will be credited manually — contact support@gvnr.dev with your tx hash. No funds are lost.',
+    });
+  }
+}
+
+// Run the x402 gate, then credit after settlement. The gate's payment-error branch RETURNS a
+// 402 Response (without setting c.res), while its verified branch sets c.res and returns void —
+// so we must propagate a returned Response onto c.res before crediting and returning.
+async function gateThenCredit(c: Context<AppVars>, next: Next): Promise<Response> {
+  const gateRes = await x402Gate(c, next);
+  if (gateRes instanceof Response) c.res = gateRes;
+  await creditAfterSettle(c);
+  return c.res;
+}
+
+// Preset packs (POST /v1/account/topup/:pack) — fixed amounts. Use a required :pack segment
+// (NOT /*) so this gate does NOT also match the bare pay-as-you-go path below — otherwise it
+// would intercept and 402 before the bare-path amount validation could run. Credit is applied
+// post-settlement by creditAfterSettle, not by the handler.
+app.use('/v1/account/topup/:pack', (c, next) => gateThenCredit(c, next));
 
 // Pay-as-you-go (POST /v1/account/topup?usd=<dollars>) — bare path. Validate the amount BEFORE
 // the x402 gate builds a challenge, so an invalid or below-minimum amount returns a clean 400
-// instead of a 402 quoting a bogus price.
+// instead of a 402 quoting a bogus price. Credit is applied post-settlement by creditAfterSettle.
 app.use('/v1/account/topup', async (c, next) => {
   const parsed = parseTopupUsd(c.req.query('usd'));
   if (!parsed.ok) {
     return c.json({ error: parsed.error, retryable: false, hint: parsed.hint }, 400);
   }
-  return x402Gate(c, next);
+  return gateThenCredit(c, next);
 });
 
 app.route('/v1/account', accountRoutes);

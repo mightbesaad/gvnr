@@ -2,10 +2,10 @@ import { Hono } from 'hono';
 import type { AccountConfigRecord, Env } from '../lib/types';
 import { hashApiKey } from '../lib/kv';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
-import { PACKS, type PackName, parseTopupUsd } from '../lib/x402';
+import { PACKS, type PackName, parseTopupUsd, type TopupIntent } from '../lib/x402';
 import { opsForUsd } from '../lib/models';
 
-type Variables = AuthVariables;
+type Variables = AuthVariables & { topupIntent?: TopupIntent };
 
 const account = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -90,6 +90,11 @@ account.delete('/notification-email', authMiddleware, async (c) => {
 // payment is verified against a challenge built for exactly `?usd=`. We re-parse the same param
 // through the shared canonicalizer, so credited ops are bound to the verified (exact-scheme)
 // authorization amount — never to an unverified client claim.
+//
+// We do NOT credit here: payment is verified but NOT yet settled at this point. We stash the
+// intent and return a provisional 200; the wrapper in index.ts credits only after settlement
+// succeeds (see TopupIntent / shouldCreditAfterSettle). That closes the verify→settle window
+// where a settle-fail could otherwise leave ops credited without funds.
 account.post('/topup', authMiddleware, async (c) => {
   const parsed = parseTopupUsd(c.req.query('usd'));
   if (!parsed.ok) {
@@ -97,16 +102,14 @@ account.post('/topup', authMiddleware, async (c) => {
   }
 
   const accountId = c.get('accountId');
-  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
   const ops = opsForUsd(parsed.usd);
-  const result = await stub.credit(ops);
-
-  return c.json({ operations_remaining: result.operations_remaining, credited_ops: ops, credited_usd: parsed.usd });
+  c.set('topupIntent', { accountId, ops, body: { credited_ops: ops, credited_usd: parsed.usd } });
+  return c.json({ credited_ops: ops, credited_usd: parsed.usd, operations_remaining: null });
 });
 
-// POST /v1/account/topup/:pack — x402-gated credit top-up
-// x402 middleware (applied in index.ts) intercepts first: returns 402 if no payment,
-// calls next() if payment is verified. By the time this handler runs, payment is settled.
+// POST /v1/account/topup/:pack — x402-gated credit top-up (preset amount).
+// Same settle-contingent crediting as the pay-as-you-go path above: verified here, credited by
+// the wrapper in index.ts only after on-chain settlement succeeds.
 account.post('/topup/:pack', authMiddleware, async (c) => {
   const packName = c.req.param('pack') as PackName;
   const pack = PACKS[packName];
@@ -116,11 +119,9 @@ account.post('/topup/:pack', authMiddleware, async (c) => {
   }
 
   const accountId = c.get('accountId');
-  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
   const ops = opsForUsd(pack.amount_usd);
-  const result = await stub.credit(ops);
-
-  return c.json({ operations_remaining: result.operations_remaining, pack: packName, credited_ops: ops });
+  c.set('topupIntent', { accountId, ops, body: { pack: packName, credited_ops: ops } });
+  return c.json({ pack: packName, credited_ops: ops, operations_remaining: null });
 });
 
 export default account;

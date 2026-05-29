@@ -13,13 +13,11 @@ const FALLBACK_FACILITATOR_URL = 'https://x402.org/facilitator';
 // while protecting bottom-end unit economics. The manual tx-hash verify path intentionally
 // has NO minimum (it credits whatever USDC actually arrived, so it can never eat funds).
 //
-// MAX is a deliberately conservative $100 (not a mere fat-finger guard). The x402 middleware
-// credits at *verify* time (inside the handler), then settles AFTER — a payment that verifies
-// but fails to settle leaves ops credited with no money received, and settlement can't roll
-// back the Durable Object credit. Capping per-attempt value near preset territory ($79) bounds
-// that verify→settle exposure. The real fix is to move stub.credit() into an onAfterSettle hook
-// (credit contingent on settlement); tracked for trust-hardening Release B. Raise this cap once
-// that lands.
+// MAX is currently a conservative $100. It was originally a hard bound on verify→settle exposure
+// (the middleware used to credit at verify time, before settlement). That exposure is now CLOSED:
+// crediting is contingent on settlement success via the creditAfterSettle wrapper in index.ts
+// (see TopupIntent / shouldCreditAfterSettle), so the cap is now just a fat-finger / abuse guard
+// and can be raised when there's a reason to.
 export const MIN_TOPUP_USD = 1;
 export const MAX_TOPUP_USD = 100;
 
@@ -62,6 +60,30 @@ export const PACKS = {
 } as const;
 
 export type PackName = keyof typeof PACKS;
+
+// Credit-after-settlement plumbing. The x402 middleware credits NOTHING itself. A topup route
+// handler validates the (verified) payment, stashes a TopupIntent on the request context, and
+// returns a provisional 2xx. The middleware then settles on-chain and either leaves that 2xx in
+// place (success) or overwrites it with a 402 (settlement failure). Only afterward does the
+// wrapper in index.ts run shouldCreditAfterSettle + AccountState.credit — so a verify-then-
+// settle-fail can never leave ops credited without funds. This closes the verify→settle window
+// that the $100 MAX_TOPUP_USD cap was a stopgap for. `body` is the provisional response body the
+// handler built (minus operations_remaining, which only exists once the credit lands).
+export interface TopupIntent {
+  accountId: string;
+  ops: number;
+  body: Record<string, unknown>;
+}
+
+// Credit iff the handler stashed an intent (i.e. payment verified and the handler ran) AND the
+// final response is a success (settlement did not overwrite it with a 402). Type-guards `intent`
+// so the caller gets a non-undefined TopupIntent in the true branch.
+export function shouldCreditAfterSettle(
+  intent: TopupIntent | undefined,
+  status: number,
+): intent is TopupIntent {
+  return intent !== undefined && status < 400;
+}
 
 // Singleton state — one resource server + one init promise per Workers isolate.
 let resourceServer: x402ResourceServer | null = null;
