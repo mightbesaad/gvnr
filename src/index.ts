@@ -149,7 +149,7 @@ app.get('/.well-known/mcp.json', (c) => {
   return c.json({
     name: 'Gvnr',
     description: 'x402-paying AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges. One MCP endpoint, one credit pool, settled via x402 (USDC on Base).',
-    version: '1.5.1',
+    version: '1.5.2',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
     authentication: {
@@ -210,7 +210,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Gvnr', version: '1.5.1', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
+    info: { title: 'Gvnr', version: '1.5.2', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
