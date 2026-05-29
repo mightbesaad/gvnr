@@ -49,7 +49,7 @@ tos.get('/', (c) => {
       <h2>Terms of Service</h2>
       <p><strong>1. Service.</strong> Gvnr provides API endpoints and an MCP server for controlling AI agent spend. The service is provided "as is" without warranties of any kind. Use at your own risk.</p>
       <p><strong>2. Accounts.</strong> Accounts are provisioned via <code>POST /v1/account</code>. You receive a random API key. You are solely responsible for keeping it secure. There is no account recovery — if you lose your API key, those credits are lost.</p>
-      <p><strong>3. Credits.</strong> Credits are purchased in packs via USDC on Base mainnet. Credits do not expire. One credit pack purchase covers one account; credits are not transferable between accounts.</p>
+      <p><strong>3. Governance ops.</strong> Governance operations are purchased pay-as-you-go via USDC on Base mainnet — any amount, credited at a fixed rate per dollar. Ops do not expire. A top-up credits the account it is paid for; ops are not transferable between accounts.</p>
       <p><strong>4. Acceptable use.</strong> You may not use the service to:</p>
       <ul>
         <li>Circumvent or abuse spend limits on behalf of other users</li>

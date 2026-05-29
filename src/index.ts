@@ -141,9 +141,8 @@ app.get('/sitemap.xml', (c) => {
   <url><loc>https://gvnr.dev/</loc></url>
   <url><loc>https://gvnr.dev/b2b</loc></url>
   <url><loc>https://gvnr.dev/tos</loc></url>
-  <url><loc>https://gvnr.dev/pay/starter</loc></url>
-  <url><loc>https://gvnr.dev/pay/growth</loc></url>
-  <url><loc>https://gvnr.dev/pay/studio</loc></url>
+  <url><loc>https://gvnr.dev/status</loc></url>
+  <url><loc>https://gvnr.dev/pay</loc></url>
 </urlset>`);
 });
 
@@ -151,7 +150,7 @@ app.get('/.well-known/mcp.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     name: 'Gvnr',
-    description: 'x402-paying AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges. One MCP endpoint, one credit pool, settled via x402 (USDC on Base).',
+    description: 'x402-paying AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges. One MCP endpoint, pay-as-you-go in USDC on Base.',
     version: '1.7.0',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
@@ -278,27 +277,52 @@ app.get('/openapi.json', (c) => {
           },
         },
       },
-      '/v1/account/topup-verify/{pack}': {
+      '/v1/account/topup-verify': {
         post: {
-          summary: 'Verify on-chain USDC payment and credit account',
+          summary: 'Verify on-chain USDC payment and credit account (any amount)',
+          description: 'Pay-as-you-go: submit a Base USDC transaction hash; ops are credited proportional to however much USDC actually arrived at the receiving address (1,000 ops per $1). Any amount works — nothing is rejected or wasted.',
           security: [{ bearerAuth: [] }],
-          parameters: [{ name: 'pack', in: 'path', required: true, schema: { type: 'string', enum: ['starter', 'growth', 'studio'] } }],
           requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { tx_hash: { type: 'string', description: 'Base mainnet USDC transaction hash (0x-prefixed, 64 hex chars)' } }, required: ['tx_hash'] } } } },
           responses: {
             '200': {
               description: 'Credits applied (or already_credited=true if tx was previously verified)',
               content: { 'application/json': { schema: {
                 type: 'object',
-                required: ['operations_remaining', 'pack'],
+                required: ['operations_remaining'],
                 properties: {
                   operations_remaining: { type: 'integer', description: 'Governance operations remaining after credit' },
-                  pack: { type: 'string', enum: ['starter', 'growth', 'studio'] },
-                  credited_ops: { type: 'integer', description: 'Governance operations granted by this pack' },
+                  credited_ops: { type: 'integer', description: 'Governance operations granted (floor(usd × 1000))' },
+                  credited_usd: { type: 'number', description: 'USD value of USDC received on-chain' },
                   already_credited: { type: 'boolean', description: 'True if this tx_hash was previously verified (idempotent replay)' },
                 },
               } } },
             },
-            default: { description: 'Error (invalid_pack, invalid_tx_hash, misconfigured_network, on-chain verification failure)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            default: { description: 'Error (invalid_tx_hash, misconfigured_network, on-chain verification failure)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
+        },
+      },
+      '/v1/account/topup-verify/{pack}': {
+        post: {
+          summary: 'Verify on-chain USDC payment (back-compat alias)',
+          description: 'Back-compat alias for POST /v1/account/topup-verify. The {pack} segment is ignored; ops are credited proportional to the actual USDC received.',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'pack', in: 'path', required: true, schema: { type: 'string' } }],
+          requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { tx_hash: { type: 'string', description: 'Base mainnet USDC transaction hash (0x-prefixed, 64 hex chars)' } }, required: ['tx_hash'] } } } },
+          responses: {
+            '200': {
+              description: 'Credits applied (or already_credited=true if tx was previously verified)',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['operations_remaining'],
+                properties: {
+                  operations_remaining: { type: 'integer', description: 'Governance operations remaining after credit' },
+                  credited_ops: { type: 'integer', description: 'Governance operations granted (floor(usd × 1000))' },
+                  credited_usd: { type: 'number', description: 'USD value of USDC received on-chain' },
+                  already_credited: { type: 'boolean', description: 'True if this tx_hash was previously verified (idempotent replay)' },
+                },
+              } } },
+            },
+            default: { description: 'Error (invalid_tx_hash, misconfigured_network, on-chain verification failure)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
           },
         },
       },
@@ -839,7 +863,6 @@ app.get('/favicon.ico', (c) => {
 });
 
 app.get('/', (c) => {
-  const network = c.env.X402_NETWORK === 'eip155:8453' ? 'Base mainnet' : 'Base Sepolia (testnet)';
   c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('Link', '</openapi.json>; rel="describedby", </.well-known/mcp.json>; rel="mcp"');
@@ -849,9 +872,9 @@ app.get('/', (c) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gvnr — AI agent substrate</title>
-  <meta name="description" content="AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, one credit pool.">
+  <meta name="description" content="AI agent substrate — real-time spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, settled in USDC on Base.">
   <meta property="og:title" content="Gvnr">
-  <meta property="og:description" content="AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, one credit pool.">
+  <meta property="og:description" content="AI agent substrate — real-time spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, settled in USDC on Base.">
   <meta property="og:url" content="https://gvnr.dev">
   <meta property="og:type" content="website">
   <meta name="robots" content="index, follow">
@@ -969,45 +992,150 @@ app.get('/', (c) => {
     pre { background: #0a0a0c; border-color: #1a1a1f; }
 
     .section-label { display: inline-block; font-family: "SF Mono","Fira Code",monospace; font-size: 0.7rem; color: #777; background: #131318; border: 1px solid #22222a; border-radius: 4px; padding: 2px 8px; margin-left: 4px; letter-spacing: 0.03em; }
+
+    /* ── top bar ── */
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 40px; flex-wrap: wrap; }
+    .topbar .brand { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em; color: #fff; }
+    .topbar .brand .reg { color: #6d5ce7; }
+    .topbar nav { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+    .topbar nav a { color: #999; text-decoration: none; font-size: 0.85rem; transition: color 0.15s; }
+    .topbar nav a:hover { color: #cfcfcf; }
+    .topbar .status-pill { display: inline-flex; align-items: center; gap: 7px; font-size: 0.8rem; color: #9aa; padding: 4px 10px; border: 1px solid #1d2a1d; border-radius: 999px; background: #0c130c; }
+    .topbar .status-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 7px rgba(34,197,94,0.6); }
+    .topbar .topcta { background: #4f46e5; color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 0.85rem; font-weight: 500; cursor: pointer; transition: all 0.15s; box-shadow: 0 4px 14px rgba(79,70,229,0.22); }
+    .topbar .topcta:hover { opacity: 0.92; transform: translateY(-1px); }
+
+    /* ── hero eyebrow + ctas + pills ── */
+    .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-family: "SF Mono","Fira Code",monospace; font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: #a78bfa; background: #14121f; border: 1px solid #2a2545; border-radius: 999px; padding: 5px 12px; margin-bottom: 20px; align-self: flex-start; }
+    .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: #a78bfa; box-shadow: 0 0 7px rgba(167,139,250,0.7); }
+    h1 .accent { background: linear-gradient(180deg,#a78bfa,#6d5ce7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .hero-ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 22px; }
+    .btn-primary-lg { background: #4f46e5; color: #fff; border: none; text-decoration: none; padding: 12px 22px; border-radius: 9px; font-size: 0.92rem; font-weight: 500; cursor: pointer; transition: all 0.15s; box-shadow: 0 6px 18px rgba(79,70,229,0.28); display: inline-flex; align-items: center; gap: 8px; }
+    .btn-primary-lg:hover { opacity: 0.93; transform: translateY(-1px); }
+    .btn-ghost-lg { background: #121216; color: #ddd; border: 1px solid #26262e; text-decoration: none; padding: 12px 20px; border-radius: 9px; font-size: 0.92rem; font-weight: 500; transition: border-color 0.15s; display: inline-flex; align-items: center; gap: 8px; }
+    .btn-ghost-lg:hover { border-color: #3a3a44; }
+    .hero-pills { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 26px; }
+    .hero-pill { display: flex; align-items: flex-start; gap: 8px; font-size: 0.8rem; color: #aaa; }
+    .hero-pill svg { flex-shrink: 0; margin-top: 1px; }
+    .hero-pill strong { color: #ddd; font-weight: 500; display: block; }
+
+    /* ── governance stream panel ── */
+    .stream { background: #0b0b0e; border: 1px solid #1d1d22; border-radius: 14px; overflow: hidden; box-shadow: 0 18px 44px rgba(0,0,0,0.5); }
+    .stream-head { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid #16161a; }
+    .stream-head .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.6); }
+    .stream-head .title { font-family: "SF Mono","Fira Code",monospace; font-size: 0.74rem; letter-spacing: 0.08em; text-transform: uppercase; color: #bbb; }
+    .stream-head .sample-tag { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: #777; border: 1px solid #2a2a32; border-radius: 4px; padding: 1px 6px; }
+    .stream-head .right { margin-left: auto; font-size: 0.72rem; color: #555; }
+    .stream-body { padding: 6px 0; min-height: 268px; }
+    .stream-row { display: grid; grid-template-columns: auto auto 1fr auto; gap: 12px; align-items: center; padding: 9px 16px; font-family: "SF Mono","Fira Code",monospace; font-size: 0.74rem; border-bottom: 1px solid #100f14; animation: streamIn 0.4s ease; }
+    @keyframes streamIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+    .stream-row .t { color: #555; }
+    .stream-row .verdict { font-size: 0.66rem; font-weight: 600; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 4px; text-align: center; }
+    .stream-row .verdict.ok { color: #4ade80; background: #0c1f0c; border: 1px solid #1e3a1e; }
+    .stream-row .verdict.no { color: #f87171; background: #1f0c0c; border: 1px solid #3a1e1e; }
+    .stream-row .detail { color: #b9b9c4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stream-row .detail .cost { color: #fbbf24; }
+    .stream-row .env { color: #555; font-size: 0.68rem; text-align: right; }
+    .stream-foot { padding: 11px 16px; border-top: 1px solid #16161a; font-size: 0.73rem; color: #666; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .stream-foot a { color: #818cf8; text-decoration: none; }
+
+    /* ── feature cards ── */
+    .features { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 560px) { .features { grid-template-columns: 1fr 1fr; } }
+    @media (min-width: 900px) { .features { grid-template-columns: repeat(4,1fr); } }
+    .feature { background: #0f0f12; border: 1px solid #1f1f24; border-radius: 10px; padding: 18px; text-decoration: none; display: block; transition: border-color 0.15s, transform 0.15s; }
+    .feature:hover { border-color: #2a2a36; transform: translateY(-2px); }
+    .feature .ficon { width: 30px; height: 30px; color: #a78bfa; margin-bottom: 12px; }
+    .feature .ftitle { font-size: 0.95rem; font-weight: 600; color: #e8e8e8; margin-bottom: 6px; }
+    .feature .fdesc { font-size: 0.8rem; color: #888; line-height: 1.55; }
+
+    /* ── top-up section ── */
+    .topup-card { background: linear-gradient(180deg,#101019,#0c0c11); border: 1px solid #23233a; border-radius: 12px; padding: 22px; }
+    .topup-lead { font-size: 0.95rem; color: #ddd; margin-bottom: 4px; }
+    .topup-rate { font-size: 0.82rem; color: #888; margin-bottom: 18px; }
+    .topup-rate strong { color: #a78bfa; }
+    .amount-chips { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+    .chip { display: flex; flex-direction: column; gap: 3px; background: #0f0f14; border: 1px solid #24242e; border-radius: 9px; padding: 12px 16px; text-decoration: none; color: inherit; min-width: 96px; transition: border-color 0.15s, transform 0.15s; }
+    .chip:hover { border-color: #4f46e5; transform: translateY(-1px); }
+    .chip .ca { font-size: 1.15rem; font-weight: 700; color: #e5e5e5; }
+    .chip .co { font-size: 0.72rem; color: #888; }
+    .chip.trial { border-color: #2a2545; background: #14121f; }
+    .chip.trial .ca { color: #a78bfa; }
+    .chip .tag { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: #6d5ce7; }
+
+    /* ── bottom CTA band ── */
+    .cta-band { display: flex; align-items: center; gap: 22px; background: linear-gradient(110deg,#13131f,#0d0d12); border: 1px solid #26263c; border-radius: 14px; padding: 26px 28px; flex-wrap: wrap; }
+    .cta-band .cb-icon { width: 48px; height: 48px; border-radius: 11px; background: #0a0a0f; border: 1px solid #2a2a3a; display: flex; align-items: center; justify-content: center; color: #a78bfa; font-family: "SF Mono","Fira Code",monospace; font-size: 1.3rem; flex-shrink: 0; }
+    .cta-band .cb-text { flex: 1; min-width: 220px; }
+    .cta-band .cb-title { font-size: 1.1rem; font-weight: 600; color: #fff; margin-bottom: 4px; }
+    .cta-band .cb-sub { font-size: 0.85rem; color: #999; line-height: 1.5; }
+    .cta-band .cb-actions { display: flex; gap: 12px; flex-wrap: wrap; }
   </style>
 </head>
 <body>
   <div class="container">
+    <div class="topbar">
+      <div class="brand">gvnr<span class="reg">.dev</span></div>
+      <nav>
+        <a href="#tools">Tools</a>
+        <a href="#compose">Compose</a>
+        <a href="#quickstart">Docs</a>
+        <a href="#pricing">Pricing</a>
+        <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
+        <a class="status-pill" href="/status"><span class="dot"></span>Status</a>
+        <button class="topcta" onclick="getApiKey()">Get API key</button>
+      </nav>
+    </div>
+
     <header class="hero">
       <div class="hero-text">
-        <h1>Gvnr</h1>
-        <p class="tagline">Spend caps, rate coordination, and a human-in-the-loop gate for AI agents — enforced before the call, not after the invoice.</p>
-        <p class="value-prop">One MCP endpoint, one credit pool, settled via x402 (USDC on Base). Compose <code style="font-family:monospace;color:#c4b5fd">budget_clear → rate_check → idempotency_check → call LLM → reconcile</code> before every provider request, or fall back to <code style="font-family:monospace;color:#c4b5fd">request_approval</code> when an agent needs a human.</p>
-        <div class="header-row">
-          <div class="status">
-            <div class="dot"></div>
-            <div class="status-text"><strong>Live</strong> &nbsp;·&nbsp; <span class="network-badge">x402 · ${network}</span></div>
+        <div class="eyebrow"><span class="dot"></span>Agent runtime governance</div>
+        <h1>Economic control for <span class="accent">autonomous agents</span></h1>
+        <p class="tagline">gvnr enforces budgets and rate limits in real time — before the call, not after the invoice.</p>
+        <p class="value-prop">One MCP endpoint, settled in USDC on Base. Compose <code style="font-family:monospace;color:#c4b5fd">budget_clear → rate_check → idempotency_check → call LLM → reconcile</code> before every provider request, or hand off to <code style="font-family:monospace;color:#c4b5fd">request_approval</code> when an agent needs a human.</p>
+        <div class="hero-ctas">
+          <button class="btn-primary-lg" onclick="getApiKey()">Get an API key →</button>
+          <a class="btn-ghost-lg" href="#quickstart">Read the docs</a>
+        </div>
+        <div class="hero-pills">
+          <div class="hero-pill">
+            <svg class="ficon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span><strong>Real-time enforcement</strong>checked before the call</span>
           </div>
-          <a class="cta-btn" href="#credit-packs">Top up with USDC →</a>
+          <div class="hero-pill">
+            <svg class="ficon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M14.5 9.5a2.5 2.5 0 0 0-2.5-1.5c-1.5 0-2.5.8-2.5 2s1 1.8 2.5 2 2.5.8 2.5 2-1 2-2.5 2a2.5 2.5 0 0 1-2.5-1.5M12 6.5v1.5M12 16v1.5"/></svg>
+            <span><strong>USDC-native</strong>x402 on Base</span>
+          </div>
+          <div class="hero-pill">
+            <svg class="ficon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6M15 2v6M7 8h10v3a5 5 0 0 1-10 0zM12 16v6"/></svg>
+            <span><strong>Built for MCP</strong>&amp; any agent</span>
+          </div>
         </div>
       </div>
-      <div class="hero-terminal" aria-hidden="true">
-        <div class="ht-bar">
-          <div class="ht-dot"></div><div class="ht-dot"></div><div class="ht-dot"></div>
-          <div class="ht-host">agent@research-loop</div>
+      <div class="stream" aria-hidden="true">
+        <div class="stream-head">
+          <span class="live-dot"></span>
+          <span class="title">Governance stream</span>
+          <span class="sample-tag">sample</span>
+          <span class="right">verdicts</span>
         </div>
-        <div class="ht-line"><span class="ht-prompt">$</span><span class="ht-cmd">budget_clear</span> <span class="ht-arg">model=opus-4-8 tokens=2000</span></div>
-        <div class="ht-line"><span class="ht-ok">✓ approved</span></div>
-        <div class="ht-line" style="padding-left:1.4em"><span class="ht-amt">9,999 ops remaining</span></div>
-        <div class="ht-line" style="padding-left:1.4em"><span class="ht-arg">spend envelope: $4.95 left</span></div>
-        <div class="ht-line gap"><span class="ht-prompt">$</span><span class="ht-cmd">rate_check</span> <span class="ht-arg">provider=anthropic model=opus-4-8</span></div>
-        <div class="ht-line"><span class="ht-ok">✓ allowed</span> <span class="ht-arg">· 4/30 RPM</span></div>
-        <div class="ht-line gap"><span class="ht-prompt">$</span><span class="ht-comment"># → your LLM call (you pay your provider)</span></div>
-        <div class="ht-line gap"><span class="ht-prompt">$</span><span class="ht-cmd">reconcile</span> <span class="ht-arg">actual_in=1800 actual_out=2400</span></div>
-        <div class="ht-line"><span class="ht-ok">✓ trued up</span></div>
-        <div class="ht-line" style="padding-left:1.4em"><span class="ht-amt">9,999 ops remaining</span></div>
-        <div class="ht-line" style="padding-left:1.4em"><span class="ht-arg">spend envelope: $4.93 left</span></div>
+        <div class="stream-body" id="stream-body">
+          <div class="stream-row"><span class="t">12:01:18</span><span class="verdict ok">APPROVED</span><span class="detail">budget_clear model=sonnet-4-6 <span class="cost">$0.0287</span></span><span class="env">coding-agent</span></div>
+          <div class="stream-row"><span class="t">12:01:14</span><span class="verdict no">DENIED</span><span class="detail">budget_clear envelope_exceeded limit $5.00</span><span class="env">research-agent</span></div>
+          <div class="stream-row"><span class="t">12:01:11</span><span class="verdict ok">APPROVED</span><span class="detail">rate_check anthropic/opus-4-8 · 4/30 RPM</span><span class="env">research-agent</span></div>
+          <div class="stream-row"><span class="t">12:01:07</span><span class="verdict ok">APPROVED</span><span class="detail">budget_clear model=haiku-4-5 <span class="cost">$0.0113</span></span><span class="env">data-agent</span></div>
+          <div class="stream-row"><span class="t">12:01:03</span><span class="verdict ok">APPROVED</span><span class="detail">budget_clear model=opus-4-8 <span class="cost">$0.0421</span></span><span class="env">research-agent</span></div>
+        </div>
+        <div class="stream-foot">
+          <span>Illustrative — a sample of the verdicts gvnr returns.</span>
+          <a href="/status">Live status →</a>
+        </div>
       </div>
     </header>
 
     <nav class="docs-nav">
       <span class="nav-label">On this page</span>
-      <a href="#credit-packs">Packs</a>
+      <a href="#features">Features</a>
       <span class="nav-dot">·</span>
       <a href="#tools">Tools</a>
       <span class="nav-dot">·</span>
@@ -1016,8 +1144,12 @@ app.get('/', (c) => {
       <a href="#quickstart">Quick start</a>
       <span class="nav-dot">·</span>
       <a href="#pricing">Pricing</a>
+      <span class="nav-dot">·</span>
+      <a href="#topup">Top up</a>
       <span class="nav-dot" style="margin:0 6px">|</span>
       <span class="nav-label">Reference</span>
+      <a href="/status">Status</a>
+      <span class="nav-dot">·</span>
       <a href="/b2b">B2B</a>
       <span class="nav-dot">·</span>
       <a href="/openapi.json">OpenAPI</a>
@@ -1027,30 +1159,30 @@ app.get('/', (c) => {
       <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
     </nav>
 
-    <section id="credit-packs">
-      <h2>Credit packs</h2>
-      <div class="packs">
-        <a class="pack" href="/pay/starter" data-base="/pay/starter">
-          <div class="pack-name">starter</div>
-          <div class="pack-price">$19</div>
-          <div class="pack-detail">19,000 governance ops</div>
+    <section id="features">
+      <h2>Everything you need to govern agents</h2>
+      <div class="features">
+        <a class="feature" href="#spend">
+          <svg class="ficon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M16 14h2"/></svg>
+          <div class="ftitle">Spend envelopes</div>
+          <div class="fdesc">Per-agent USD caps with hard limits and daily or session windows. <code style="font-family:monospace;color:#a78bfa">budget_clear</code> deducts before the call.</div>
         </a>
-        <a class="pack" href="/pay/growth" data-base="/pay/growth">
-          <div class="pack-name">growth</div>
-          <div class="pack-price">$39</div>
-          <div class="pack-detail">39,000 governance ops</div>
+        <a class="feature" href="#rate-limits">
+          <svg class="ficon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+          <div class="ftitle">Rate coordination</div>
+          <div class="fdesc">Share a provider's RPM across many agents with per-(agent, provider, model) envelopes and fixed windows.</div>
         </a>
-        <a class="pack" href="/pay/studio" data-base="/pay/studio">
-          <div class="pack-name">studio</div>
-          <div class="pack-price">$79</div>
-          <div class="pack-detail">79,000 governance ops</div>
+        <a class="feature" href="#reconcile">
+          <svg class="ficon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg>
+          <div class="ftitle">Reconciliation</div>
+          <div class="fdesc">After the LLM responds, true the envelope up to actual cost. Estimates stay honest; drift is flagged.</div>
+        </a>
+        <a class="feature" href="#approvals">
+          <svg class="ficon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M16 11l2 2 4-4"/></svg>
+          <div class="ftitle">Human approvals</div>
+          <div class="fdesc">Pause for a human-in-the-loop on denial or any sensitive action — a mobile-friendly URL to approve or deny.</div>
         </a>
       </div>
-      <div class="key-row">
-        <input class="key-input" id="api-key-input" type="text" placeholder="Paste your API key (bg_...)" autocomplete="off" spellcheck="false">
-        <button class="btn-get-key" id="get-key-btn" onclick="getApiKey()">Get API key</button>
-      </div>
-      <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay-as-you-go — USDC on Base mainnet, no minimum: send any amount and ops are credited at ~1,000 per $1 (these packs are just presets). Works with Base MCP, AgentKit, and any x402 client. Ops cover governance operations (budget_clear, rate_check, idempotency_check…); your LLM tokens are billed by your provider, not by gvnr. Credited immediately after on-chain verification.</p>
     </section>
 
     <section id="tools">
@@ -1152,7 +1284,7 @@ app.get('/', (c) => {
           <div class="compose-step muted">resume the call</div>
         </div>
       </div>
-      <p class="compose-note">One credit pool draws across all calls. Same auth, same endpoint, no extra infra. Any tool can be added or removed without re-integrating.</p>
+      <p class="compose-note">Every tool draws from one operation quota. Same auth, same endpoint, no extra infra. Any tool can be added or removed without re-integrating.</p>
     </section>
 
     <section id="quickstart">
@@ -1167,7 +1299,7 @@ app.get('/', (c) => {
 # → { "api_key": "bg_...", "account_id": "..." }</pre>
           <p style="font-size:0.78rem;color:#888;margin:10px 0 6px">Then open the pay page in your browser (replace the key):</p>
           <div style="display:flex;gap:8px;align-items:center">
-            <div style="font-family:'SF Mono','Fira Code',monospace;font-size:0.76rem;color:#ccc;background:#111;border:1px solid #1f1f1f;border-radius:6px;padding:9px 12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="qs-url">https://gvnr.dev/pay/starter?api_key=bg_YOUR_KEY</div>
+            <div style="font-family:'SF Mono','Fira Code',monospace;font-size:0.76rem;color:#ccc;background:#111;border:1px solid #1f1f1f;border-radius:6px;padding:9px 12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="qs-url">https://gvnr.dev/pay?usd=1&amp;api_key=bg_YOUR_KEY</div>
             <button onclick="(function(b){navigator.clipboard.writeText(document.getElementById('qs-url').textContent).then(()=>{var t=b.textContent;b.textContent='Copied!';setTimeout(()=>b.textContent=t,1500)})})(this)" style="border:none;border-radius:6px;padding:8px 12px;font-size:0.78rem;font-weight:500;cursor:pointer;background:#1a1a2e;color:#a78bfa;border:1px solid #2a2a4a;white-space:nowrap">Copy</button>
           </div>
         </div>
@@ -1248,13 +1380,49 @@ curl https://gvnr.dev/v1/approval/check/APPROVAL_ID \\
       <p style="font-size:0.8rem;color:#888;margin-top:10px">These are <strong>provider</strong> list rates — they set your per-agent spend <strong>cap</strong> (the envelope), not gvnr's charge. gvnr bills a flat governance fee per operation (see the packs above); your LLM tokens are billed by your provider directly. budget_clear estimates the cap debit (output tokens for chat models, input tokens for embedding/input-only models); reconcile trues it to actual. Unlisted models fall back to the highest rate (fail-safe). Updated May 2026.</p>
     </section>
 
+    <section id="topup">
+      <h2>Top up</h2>
+      <div class="topup-card">
+        <div class="topup-lead">Pay-as-you-go in USDC on Base — no minimum, no subscription.</div>
+        <div class="topup-rate">Any amount credits governance ops at <strong>1,000 per $1</strong>. Try the whole live rail for <strong>$1</strong>. Works with Base MCP, AgentKit, and any x402 client. <span style="color:#666">$19 ≈ a few weeks of typical agent governance.</span></div>
+        <div class="amount-chips" id="amount-chips">
+          <a class="chip trial" href="/pay?usd=1" data-base="/pay?usd=1"><span class="tag">trial</span><span class="ca">$1</span><span class="co">1,000 ops</span></a>
+          <a class="chip" href="/pay?usd=19" data-base="/pay?usd=19"><span class="ca">$19</span><span class="co">19,000 ops</span></a>
+          <a class="chip" href="/pay?usd=39" data-base="/pay?usd=39"><span class="ca">$39</span><span class="co">39,000 ops</span></a>
+          <a class="chip" href="/pay?usd=79" data-base="/pay?usd=79"><span class="ca">$79</span><span class="co">79,000 ops</span></a>
+          <a class="chip" href="/pay" data-base="/pay"><span class="ca">Custom</span><span class="co">name your amount</span></a>
+        </div>
+        <div class="key-row">
+          <input class="key-input" id="api-key-input" type="text" placeholder="Paste your API key (bg_...)" autocomplete="off" spellcheck="false">
+          <button class="btn-get-key" id="get-key-btn" onclick="getApiKey()">Get API key</button>
+        </div>
+        <p style="font-size:0.78rem;color:#777;margin-top:10px">Pick an amount (or name your own on the pay page). Ops cover governance operations (budget_clear, rate_check, idempotency_check…); your LLM tokens are billed by your provider, not by gvnr. Credited after on-chain settlement.</p>
+      </div>
+    </section>
+
+    <section style="margin-bottom:40px">
+      <div class="cta-band">
+        <div class="cb-icon">&gt;_</div>
+        <div class="cb-text">
+          <div class="cb-title">Start governing in minutes</div>
+          <div class="cb-sub">Add gvnr to your agent stack via one MCP endpoint or the REST API. Open source, developer-first, no account to create — just an API key.</div>
+        </div>
+        <div class="cb-actions">
+          <a class="btn-ghost-lg" href="/.well-known/mcp.json">MCP card</a>
+          <button class="btn-primary-lg" onclick="getApiKey()">Get an API key →</button>
+        </div>
+      </div>
+    </section>
+
     <footer>
       <div class="footer-row">
         <span>USDC receiver: <span class="footer-mono">${c.env.PAYTO_ADDRESS}</span></span>
         <span>·</span>
         <span>Network: Base mainnet (eip155:8453)</span>
         <span>·</span>
-        <span>Open source (MIT) · 100/100 tests passing</span>
+        <span>Open source (MIT)</span>
+        <span>·</span>
+        <a href="/status">Status</a>
         <span>·</span>
         <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
         <span>·</span>
@@ -1282,20 +1450,55 @@ curl https://gvnr.dev/v1/approval/check/APPROVAL_ID \\
 <script>
 (function () {
   var input = document.getElementById('api-key-input');
-  var packs = document.querySelectorAll('.pack[data-base]');
+  var chips = document.querySelectorAll('.chip[data-base]');
   var qsUrl = document.getElementById('qs-url');
-  input.addEventListener('input', function () {
+  function withKey(base, key) {
+    if (!key) return base;
+    return base + (base.indexOf('?') >= 0 ? '&' : '?') + 'api_key=' + encodeURIComponent(key);
+  }
+  if (input) input.addEventListener('input', function () {
     var key = this.value.trim();
-    packs.forEach(function (p) {
-      var base = p.getAttribute('data-base');
-      p.href = key ? base + '?api_key=' + encodeURIComponent(key) : base;
-    });
+    chips.forEach(function (c) { c.href = withKey(c.getAttribute('data-base'), key); });
     if (qsUrl) {
-      qsUrl.textContent = key
-        ? 'https://gvnr.dev/pay/starter?api_key=' + encodeURIComponent(key)
-        : 'https://gvnr.dev/pay/starter?api_key=bg_YOUR_KEY';
+      qsUrl.textContent = 'https://gvnr.dev' + withKey('/pay?usd=1', key || 'bg_YOUR_KEY');
     }
   });
+})();
+
+// Living "sample" governance stream — honest illustration (labeled sample), not real data.
+(function () {
+  var body = document.getElementById('stream-body');
+  if (!body) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var envs = ['research-agent', 'coding-agent', 'data-agent', 'prod-monitor', 'ingest-worker'];
+  var models = [['opus-4-8', 0.04, 0.06], ['sonnet-4-6', 0.02, 0.035], ['haiku-4-5', 0.006, 0.018]];
+  var t = new Date();
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function fmt(d) { return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+  function rnd(a) { return a[Math.floor(Math.random() * a.length)]; }
+  function makeRow() {
+    t = new Date(t.getTime() + (2000 + Math.random() * 3000));
+    var env = rnd(envs), row = document.createElement('div');
+    row.className = 'stream-row';
+    var verdict, detail;
+    if (Math.random() < 0.18) {
+      verdict = '<span class="verdict no">DENIED</span>';
+      detail = Math.random() < 0.5 ? 'budget_clear envelope_exceeded limit $5.00' : 'rate_check rate_exceeded retry 2,400ms';
+    } else if (Math.random() < 0.3) {
+      verdict = '<span class="verdict ok">APPROVED</span>';
+      detail = 'rate_check anthropic/' + rnd(models)[0] + ' · ' + (1 + Math.floor(Math.random() * 28)) + '/30 RPM';
+    } else {
+      verdict = '<span class="verdict ok">APPROVED</span>';
+      var m = rnd(models), cost = (m[1] + Math.random() * (m[2] - m[1])).toFixed(4);
+      detail = 'budget_clear model=' + m[0] + ' <span class="cost">$' + cost + '</span>';
+    }
+    row.innerHTML = '<span class="t">' + fmt(t) + '</span>' + verdict + '<span class="detail">' + detail + '</span><span class="env">' + env + '</span>';
+    return row;
+  }
+  setInterval(function () {
+    body.insertBefore(makeRow(), body.firstChild);
+    while (body.children.length > 6) body.removeChild(body.lastChild);
+  }, 2200);
 })();
 
 async function getApiKey() {
@@ -1338,8 +1541,115 @@ function closeKeyModal() {
   var input = document.getElementById('api-key-input');
   input.value = key;
   input.dispatchEvent(new Event('input'));
-  document.getElementById('credit-packs').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.getElementById('topup').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+</script>
+</body>
+</html>`;
+  return c.html(html);
+});
+
+// GET /status — operational truth, separate from the product homepage. Day-one this is the
+// current-health view (the worker serving this page proves it's up); the API row is confirmed
+// live by a client-side /health poll. No historical uptime yet.
+app.get('/status', (c) => {
+  c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
+  c.header('X-Content-Type-Options', 'nosniff');
+  const networkName = c.env.X402_NETWORK === 'eip155:8453' ? 'Base mainnet' : 'Base Sepolia (testnet)';
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Status — gvnr</title>
+  <meta name="description" content="Operational status for gvnr — the AI agent governance substrate.">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0a0a0a;color:#e5e5e5;padding:56px 24px 64px;min-height:100vh;line-height:1.55}
+    .container{max-width:640px;margin:0 auto}
+    a{color:#a78bfa;text-decoration:none}
+    a:hover{text-decoration:underline}
+    .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
+    .brand{font-size:1.1rem;font-weight:700;letter-spacing:-0.02em}
+    .brand a{color:#e5e5e5}
+    .overall{display:flex;align-items:center;gap:12px;background:linear-gradient(180deg,#0c130c,#0a0f0a);border:1px solid #1e3a1e;border-radius:12px;padding:18px 20px;margin-bottom:24px}
+    .overall .pulse{width:12px;height:12px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 0 rgba(34,197,94,0.6);animation:pulse 2s infinite}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,0.5)}70%{box-shadow:0 0 0 10px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+    .overall .ov-text{font-size:1.05rem;font-weight:600;color:#4ade80}
+    .components{display:flex;flex-direction:column;gap:8px;margin-bottom:28px}
+    .row{display:flex;align-items:center;justify-content:space-between;background:#0f0f12;border:1px solid #1f1f24;border-radius:8px;padding:13px 16px}
+    .row .name{font-size:0.9rem;color:#ddd}
+    .row .name .sub{display:block;font-size:0.74rem;color:#666;font-family:"SF Mono","Fira Code",monospace;margin-top:2px}
+    .badge{display:inline-flex;align-items:center;gap:7px;font-size:0.8rem;color:#4ade80}
+    .badge .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px rgba(34,197,94,0.5)}
+    .badge.checking{color:#818cf8}
+    .badge.checking .dot{background:#818cf8;box-shadow:0 0 8px rgba(129,140,248,0.5)}
+    .badge.down{color:#f87171}
+    .badge.down .dot{background:#ef4444;box-shadow:0 0 8px rgba(239,68,68,0.5)}
+    .meta{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;font-size:0.82rem;background:#0c0c0e;border:1px solid #1d1d22;border-radius:8px;padding:16px 18px;margin-bottom:24px}
+    .meta dt{color:#777}
+    .meta dd{color:#ccc;font-family:"SF Mono","Fira Code",monospace;font-size:0.78rem;word-break:break-all}
+    .note{font-size:0.78rem;color:#666;line-height:1.6}
+    footer{border-top:1px solid #1a1a1a;margin-top:36px;padding-top:20px;font-size:0.78rem;color:#666;display:flex;gap:16px;flex-wrap:wrap}
+    footer a{color:#777}
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="top">
+    <div class="brand"><a href="/">gvnr</a> <span style="color:#555;font-weight:400">/ status</span></div>
+    <a href="/" style="font-size:0.85rem">← Home</a>
+  </div>
+
+  <div class="overall">
+    <div class="pulse"></div>
+    <div class="ov-text">All systems operational</div>
+  </div>
+
+  <div class="components">
+    <div class="row">
+      <div class="name">API <span class="sub">gvnr.dev</span></div>
+      <div class="badge checking" id="api-badge"><span class="dot"></span><span id="api-text">checking…</span></div>
+    </div>
+    <div class="row">
+      <div class="name">MCP endpoint <span class="sub">gvnr.dev/mcp</span></div>
+      <div class="badge"><span class="dot"></span>Operational</div>
+    </div>
+    <div class="row">
+      <div class="name">x402 settlement <span class="sub">${networkName} · USDC</span></div>
+      <div class="badge"><span class="dot"></span>Operational</div>
+    </div>
+  </div>
+
+  <dl class="meta">
+    <dt>Version</dt><dd>1.7.0</dd>
+    <dt>Network</dt><dd>${c.env.X402_NETWORK} (${networkName})</dd>
+    <dt>USDC receiver</dt><dd>${c.env.PAYTO_ADDRESS}</dd>
+  </dl>
+
+  <p class="note">Live current-health view. The API row is confirmed by a real <code style="font-family:monospace">/health</code> check from your browser. Historical uptime metrics are not published yet.</p>
+
+  <footer>
+    <a href="/">Home</a>
+    <a href="/health">/health</a>
+    <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">Report an issue</a>
+  </footer>
+</div>
+
+<script>
+(async function () {
+  var badge = document.getElementById('api-badge');
+  var text = document.getElementById('api-text');
+  try {
+    var res = await fetch('/health', { cache: 'no-store' });
+    var ok = res.ok && (await res.json()).ok === true;
+    badge.className = ok ? 'badge' : 'badge down';
+    text.textContent = ok ? 'Operational' : 'Degraded';
+  } catch (e) {
+    badge.className = 'badge down';
+    text.textContent = 'Unreachable';
+  }
+})();
 </script>
 </body>
 </html>`;

@@ -1,15 +1,22 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { Env } from '../lib/types';
 import { PACKS, type PackName } from '../lib/x402';
-import { NETWORK_CONFIGS, type NetworkKey, packToRawAmount, verifyUsdcTransfer, USDC_DECIMALS } from '../lib/chain';
+import { NETWORK_CONFIGS, type NetworkKey, usdToRawAmount, verifyUsdcTransfer, USDC_DECIMALS } from '../lib/chain';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
-import { opsForUsd } from '../lib/models';
+import { opsForUsd, OPS_PER_USD } from '../lib/models';
 
 type Variables = AuthVariables;
 
+type PayCtx = Context<{ Bindings: Env; Variables: Variables }>;
+
 const pay = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-// GET /v1/packs/:pack/info — human-readable payment requirements (no auth)
+// Default amount the custom pay page opens on when no ?usd= or pack is given.
+const DEFAULT_AMOUNT_USD = 5;
+
+// GET /v1/packs/:pack/info — human-readable payment requirements for a preset amount (no auth).
+// Retained for back-compat; amounts are pay-as-you-go (any amount works), packs are just presets.
 pay.get('/v1/packs/:pack/info', async (c) => {
   const packName = c.req.param('pack') as PackName;
   const pack = PACKS[packName];
@@ -22,23 +29,20 @@ pay.get('/v1/packs/:pack/info', async (c) => {
   return c.json({
     pack: packName,
     amount_usd: pack.amount_usd,
-    description: pack.description,
+    ops: opsForUsd(pack.amount_usd),
     network_name: cfg.name,
     chain_id: cfg.chainId,
     usdc_contract: cfg.usdcContract,
-    usdc_amount_raw: packToRawAmount(pack.amount_usd).toString(),
+    usdc_amount_raw: usdToRawAmount(pack.amount_usd).toString(),
     payto_address: c.env.PAYTO_ADDRESS,
   });
 });
 
-// POST /v1/account/topup-verify/:pack — on-chain verification, credits account
-pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
-  const packName = c.req.param('pack') as PackName;
-  const pack = PACKS[packName];
-  if (!pack) return c.json({ error: 'invalid_pack', valid: Object.keys(PACKS) }, 400);
-
-  const body = await c.req.json<{ tx_hash?: string }>();
-  const txHash = body.tx_hash?.trim();
+// Verify a USDC transfer on-chain and credit ops proportional to however much actually arrived
+// at payTo (pay-as-you-go — any amount works, nothing is rejected or wasted). Shared by the
+// pack-less and back-compat pack-scoped verify routes; the pack segment is ignored for crediting.
+async function creditFromTx(c: PayCtx, rawTxHash: string | undefined) {
+  const txHash = rawTxHash?.trim();
   if (!txHash || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
     return c.json({ error: 'invalid_tx_hash', retryable: false, hint: 'tx_hash must be 0x-prefixed with 64 hex chars.' }, 400);
   }
@@ -54,7 +58,7 @@ pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
   const alreadyUsed = await c.env.BUDGET_KV.get(txKey);
   if (alreadyUsed) {
     const operations = await stub.getOperations();
-    return c.json({ operations_remaining: operations, pack: packName, already_credited: true });
+    return c.json({ operations_remaining: operations, already_credited: true });
   }
 
   const verification = await verifyUsdcTransfer(
@@ -69,8 +73,6 @@ pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
     return c.json({ error: verification.error, retryable: transient }, 400);
   }
 
-  // Pay-as-you-go: credit ops proportional to however much USDC actually arrived at payTo.
-  // Any amount works; nothing is rejected or wasted (no fund-loss footgun).
   const creditedUsd = Number(BigInt(verification.amount_raw!)) / 10 ** USDC_DECIMALS;
   const ops = opsForUsd(creditedUsd);
   const credited = await stub.credit(ops);
@@ -79,19 +81,42 @@ pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
   await c.env.BUDGET_KV.put(txKey, '1', { expirationTtl: 2592000 });
 
   return c.json({ operations_remaining: credited.operations_remaining, credited_ops: ops, credited_usd: creditedUsd });
+}
+
+// POST /v1/account/topup-verify — pay-as-you-go on-chain verification for ANY amount sent.
+pay.post('/v1/account/topup-verify', authMiddleware, async (c) => {
+  const body = await c.req.json<{ tx_hash?: string }>();
+  return creditFromTx(c, body.tx_hash);
 });
 
-// GET /pay/:pack — human-facing payment page
-pay.get('/pay/:pack', async (c) => {
-  c.header('X-Frame-Options', 'DENY');
-  c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
-  c.header('X-Content-Type-Options', 'nosniff');
+// POST /v1/account/topup-verify/:pack — back-compat. Credits proportional to actual amount
+// received; the :pack segment no longer constrains the credit.
+pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
+  const body = await c.req.json<{ tx_hash?: string }>();
+  return creditFromTx(c, body.tx_hash);
+});
 
+// GET /pay — custom-amount payment page (name your own amount; ?usd= prefills it).
+pay.get('/pay', (c) => {
+  const usd = Number(c.req.query('usd'));
+  const initial = Number.isFinite(usd) && usd > 0 ? usd : DEFAULT_AMOUNT_USD;
+  return renderPayPage(c, initial);
+});
+
+// GET /pay/:pack — back-compat preset link; renders the same page prefilled to the pack amount.
+pay.get('/pay/:pack', (c) => {
   const packName = c.req.param('pack') as PackName;
   const pack = PACKS[packName];
   if (!pack) {
-    return c.html(errorPage(`Unknown pack. Valid packs: ${Object.keys(PACKS).join(', ')}.`), 404);
+    return c.html(errorPage(`Unknown amount. Try /pay to name your own.`), 404);
   }
+  return renderPayPage(c, pack.amount_usd);
+});
+
+function renderPayPage(c: PayCtx, initialAmount: number) {
+  c.header('X-Frame-Options', 'DENY');
+  c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
+  c.header('X-Content-Type-Options', 'nosniff');
 
   const network = c.env.X402_NETWORK as NetworkKey;
   const cfg = NETWORK_CONFIGS[network];
@@ -102,21 +127,18 @@ pay.get('/pay/:pack', async (c) => {
   if (rawApiKey && !/^bg_[0-9a-f]{32}$/i.test(rawApiKey)) {
     return c.html(errorPage('Invalid API key format.'), 400);
   }
-  const apiKey = rawApiKey;
-  const rawAmount = packToRawAmount(pack.amount_usd);
+
   return c.html(payPage({
-    packName,
-    amountUsd: pack.amount_usd,
-    description: pack.description,
-    apiKey,
+    initialAmount,
+    apiKey: rawApiKey,
     networkName: cfg.name,
     chainId: cfg.chainId,
     usdcContract: cfg.usdcContract,
-    usdcAmountRaw: rawAmount.toString(),
     paytoAddress: c.env.PAYTO_ADDRESS,
     explorerUrl: cfg.explorerUrl,
+    opsPerUsd: OPS_PER_USD,
   }));
-});
+}
 
 export default pay;
 
@@ -150,30 +172,27 @@ function errorPage(message: string): string {
 }
 
 interface PageData {
-  packName: string;
-  amountUsd: number;
-  description: string;
+  initialAmount: number;
   apiKey: string;
   networkName: string;
   chainId: number;
   usdcContract: string;
-  usdcAmountRaw: string;
   paytoAddress: string;
   explorerUrl: string;
+  opsPerUsd: number;
 }
 
 function payPage(d: PageData): string {
   const chainHex = '0x' + d.chainId.toString(16);
   const isTestnet = d.networkName.includes('testnet') || d.networkName.includes('Sepolia');
-  const packLabels: Record<string, string> = { starter: 'Starter', growth: 'Growth', studio: 'Studio' };
-  const otherPacks = Object.keys(PACKS).filter(p => p !== d.packName);
+  const explorerBase = isTestnet ? 'https://sepolia.basescan.org' : 'https://basescan.org';
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Top up — Budget Governor</title>
+  <title>Top up — gvnr</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0a0a0a;color:#e5e5e5;padding:48px 24px;min-height:100vh}
@@ -182,14 +201,20 @@ function payPage(d: PageData): string {
     h1{font-size:1.4rem;font-weight:600;letter-spacing:-0.02em;margin-bottom:4px}
     .sub{color:#888;font-size:0.9rem;margin-bottom:36px}
     .card{background:#111;border:1px solid #1f1f1f;border-radius:10px;padding:20px 22px;margin-bottom:16px}
-    .step-label{font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#888;margin-bottom:10px}
-    .pack-row{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
-    .pack-name{font-size:1.1rem;font-weight:600}
-    .pack-price{font-size:1.5rem;font-weight:700;color:#a78bfa}
-    .pack-desc{font-size:0.85rem;color:#888}
-    .pack-switch{font-size:0.8rem;color:#777;margin-top:8px}
+    .step-label{font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;color:#888;margin-bottom:14px}
     .field-label{font-size:0.75rem;color:#777;margin-bottom:5px;margin-top:14px}
     .field-label:first-of-type{margin-top:0}
+    .amount-wrap{position:relative;display:flex;align-items:center}
+    .amount-wrap .cur{position:absolute;left:14px;color:#777;font-size:1.2rem;font-weight:600;pointer-events:none}
+    .amount-input{width:100%;background:#0f0f0f;border:1px solid #222;border-radius:8px;padding:12px 14px 12px 30px;font-family:"SF Mono","Fira Code",monospace;font-size:1.3rem;font-weight:600;color:#fff;outline:none;transition:border-color 0.15s}
+    .amount-input:focus{border-color:#4f46e5}
+    .ops-preview{font-size:0.92rem;color:#a78bfa;margin-top:10px;font-weight:500}
+    .ops-preview .n{color:#fff}
+    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+    .chip{background:#0f0f14;border:1px solid #24242e;border-radius:8px;padding:8px 14px;font-size:0.85rem;color:#ccc;cursor:pointer;transition:border-color 0.15s,color 0.15s;font-weight:500}
+    .chip:hover{border-color:#4f46e5;color:#fff}
+    .chip.trial{border-color:#2a2545;background:#14121f;color:#a78bfa}
+    .anchor{font-size:0.76rem;color:#666;margin-top:12px}
     .copy-row{display:flex;gap:8px;align-items:center}
     .mono{font-family:"SF Mono","Fira Code",monospace;font-size:0.82rem;color:#ccc;background:#0f0f0f;border:1px solid #222;border-radius:6px;padding:9px 12px;flex:1;overflow-wrap:break-word;word-break:break-all;white-space:normal}
     .btn{border:none;border-radius:6px;padding:9px 14px;font-size:0.82rem;font-weight:500;cursor:pointer;transition:opacity 0.15s}
@@ -220,17 +245,24 @@ function payPage(d: PageData): string {
 <body>
 <div class="container">
   <h1>Top up your account</h1>
-  <p class="sub">Pay via x402 — USDC on Base &nbsp;·&nbsp; <span class="badge ${isTestnet ? 'testnet' : ''}">${d.networkName}</span></p>
+  <p class="sub">Pay-as-you-go via x402 — USDC on Base &nbsp;·&nbsp; <span class="badge ${isTestnet ? 'testnet' : ''}">${d.networkName}</span></p>
 
-  <!-- Step 1: Pack -->
+  <!-- Step 1: Amount -->
   <div class="card">
-    <div class="step-label">1 · Select pack</div>
-    <div class="pack-row">
-      <span class="pack-name">${packLabels[d.packName] ?? d.packName}</span>
-      <span class="pack-price">$${d.amountUsd}</span>
+    <div class="step-label">1 · Choose an amount</div>
+    <div class="field-label">Amount (USDC)</div>
+    <div class="amount-wrap">
+      <span class="cur">$</span>
+      <input class="amount-input" id="amount" type="number" min="1" step="0.01" inputmode="decimal" value="${d.initialAmount}">
     </div>
-    <div class="pack-desc">${d.description}</div>
-    ${otherPacks.length ? `<div class="pack-switch">Switch: ${otherPacks.map(p => `<a href="/pay/${p}${d.apiKey ? `?api_key=${d.apiKey}` : ''}">${packLabels[p] ?? p}</a>`).join(' · ')}</div>` : ''}
+    <div class="ops-preview">→ <span class="n" id="ops-preview">0</span> governance ops</div>
+    <div class="chips">
+      <button type="button" class="chip trial" onclick="setAmount(1)">$1 trial</button>
+      <button type="button" class="chip" onclick="setAmount(19)">$19</button>
+      <button type="button" class="chip" onclick="setAmount(39)">$39</button>
+      <button type="button" class="chip" onclick="setAmount(79)">$79</button>
+    </div>
+    <div class="anchor">Any amount works — credited at ${d.opsPerUsd.toLocaleString()} ops per $1. $19 ≈ a few weeks of typical agent governance.</div>
   </div>
 
   <!-- Step 2: Send -->
@@ -243,10 +275,10 @@ function payPage(d: PageData): string {
       <button class="btn btn-copy" onclick="copy('payto', this)">Copy</button>
     </div>
 
-    <div class="field-label">Exact amount (USDC)</div>
+    <div class="field-label">Amount to send (USDC)</div>
     <div class="copy-row">
-      <div class="mono" id="amount">${d.amountUsd}.000000</div>
-      <button class="btn btn-copy" onclick="copy('amount', this)">Copy</button>
+      <div class="mono" id="send-amount">0.000000</div>
+      <button class="btn btn-copy" onclick="copy('send-amount', this)">Copy</button>
     </div>
 
     <hr class="divider">
@@ -258,9 +290,9 @@ function payPage(d: PageData): string {
     <div class="instructions">
       <ul>
         <li>Network: <strong style="color:#ccc">Base</strong> (not Ethereum mainnet)</li>
-        <li>Token: <strong style="color:#ccc">USDC</strong> — send exactly $${d.amountUsd}</li>
-        <li>Contract: <a href="${isTestnet ? 'https://sepolia.basescan.org' : 'https://basescan.org'}/token/${d.usdcContract}" target="_blank" rel="noopener" style="font-family:monospace;font-size:0.78rem;color:#818cf8">${d.usdcContract} ↗</a></li>
-        <li>Receiver: <a href="${isTestnet ? 'https://sepolia.basescan.org' : 'https://basescan.org'}/address/${d.paytoAddress}" target="_blank" rel="noopener" style="color:#818cf8">verify on Basescan ↗</a></li>
+        <li>Token: <strong style="color:#ccc">USDC</strong> — credited at ${d.opsPerUsd.toLocaleString()} ops per $1</li>
+        <li>Contract: <a href="${explorerBase}/token/${d.usdcContract}" target="_blank" rel="noopener" style="font-family:monospace;font-size:0.78rem;color:#818cf8">${d.usdcContract} ↗</a></li>
+        <li>Receiver: <a href="${explorerBase}/address/${d.paytoAddress}" target="_blank" rel="noopener" style="color:#818cf8">verify on Basescan ↗</a></li>
       </ul>
     </div>
   </div>
@@ -304,6 +336,8 @@ function payPage(d: PageData): string {
     <div class="footer-row">
       <a href="/">Home</a>
       <span>·</span>
+      <a href="/status">Status</a>
+      <span>·</span>
       <a href="/tos">Terms &amp; Refund Policy</a>
       <span>·</span>
       <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">Support</a>
@@ -314,14 +348,41 @@ function payPage(d: PageData): string {
 </div>
 
 <script>
-const PACK = ${JSON.stringify(d.packName)};
 const USDC_CONTRACT = ${JSON.stringify(d.usdcContract)};
 const PAYTO = ${JSON.stringify(d.paytoAddress)};
-const RAW_AMOUNT = ${JSON.stringify(d.usdcAmountRaw)};
 const CHAIN_ID_HEX = ${JSON.stringify(chainHex)};
 const CHAIN_ID = ${d.chainId};
 const NETWORK_NAME = ${JSON.stringify(d.networkName)};
 const EXPLORER = ${JSON.stringify(d.explorerUrl)};
+const OPS_PER_USD = ${d.opsPerUsd};
+
+// Current amount in whole cents (integer) — the single source of truth, kept cents-safe so the
+// USDC raw amount never goes through BigInt(<float>) (which RangeErrors on fractional dollars).
+function currentCents() {
+  const v = parseFloat(document.getElementById('amount').value);
+  if (!isFinite(v) || v <= 0) return 0;
+  return Math.round(v * 100);
+}
+function rawFromCents(cents) {
+  // cents * 10^(6-2) atomic USDC units
+  return (BigInt(cents) * 10000n);
+}
+
+function recompute() {
+  const cents = currentCents();
+  const usd = cents / 100;
+  const ops = Math.floor(usd * OPS_PER_USD);
+  document.getElementById('ops-preview').textContent = ops.toLocaleString();
+  document.getElementById('send-amount').textContent = usd.toFixed(6);
+}
+
+function setAmount(v) {
+  document.getElementById('amount').value = v;
+  recompute();
+}
+
+document.getElementById('amount').addEventListener('input', recompute);
+recompute();
 
 function copy(id, btn) {
   const text = document.getElementById(id).textContent;
@@ -345,7 +406,7 @@ async function attemptVerify() {
   if (!apiKey) return { localError: 'no_key' };
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return { localError: 'bad_hash' };
   try {
-    const res = await fetch('/v1/account/topup-verify/' + PACK, {
+    const res = await fetch('/v1/account/topup-verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
       body: JSON.stringify({ tx_hash: txHash }),
@@ -385,7 +446,6 @@ async function verifyPayment() {
 }
 
 // Auto-verify after wallet pay — retries on transient errors (tx not indexed yet, RPC blip).
-// Manual "Verify" button stays one-shot since the user controls when to retry.
 const TRANSIENT_ERRORS = new Set(['tx_not_found', 'rpc_error']);
 async function autoVerify(attempt, retryDelays) {
   const totalAttempts = retryDelays.length + 1;
@@ -448,6 +508,11 @@ async function connectAndPay() {
     showStatus('No wallet detected. Install MetaMask or Coinbase Wallet, then use the manual flow above.', 'err');
     return;
   }
+  const cents = currentCents();
+  if (cents <= 0) {
+    showStatus('Enter an amount greater than $0 first.', 'err');
+    return;
+  }
 
   const btn = document.getElementById('wallet-btn');
   btn.textContent = 'Connecting...';
@@ -474,10 +539,10 @@ async function connectAndPay() {
       } else throw err;
     }
 
-    // Encode USDC transfer(address,uint256) calldata
+    // Encode USDC transfer(address,uint256) calldata — amount recomputed cents-safe from the input.
     const selector = 'a9059cbb';
     const paddedTo = PAYTO.slice(2).toLowerCase().padStart(64, '0');
-    const paddedAmt = BigInt(RAW_AMOUNT).toString(16).padStart(64, '0');
+    const paddedAmt = rawFromCents(cents).toString(16).padStart(64, '0');
     const data = '0x' + selector + paddedTo + paddedAmt;
 
     btn.textContent = 'Approve in wallet...';

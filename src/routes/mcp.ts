@@ -32,7 +32,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   const accountId = account.account_id;
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
 
-  const server = new McpServer({ name: 'gvnr', version: '1.5.1' });
+  const server = new McpServer({ name: 'gvnr', version: '1.7.0' });
 
   const origin = new URL(c.req.url).origin;
 
@@ -91,7 +91,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'get_balance',
     {
-      description: 'Read-only snapshot of the account-level governance-operation quota. The quota is increased by topups (each pack grants a fixed number of operations) and decreased by one per `budget_clear`. Your LLM token spend is billed by your provider, not here; per-agent spend caps are separate — see `set_envelope`. Returns {operations_remaining:number}.',
+      description: 'Read-only snapshot of the account-level governance-operation quota. The quota is increased by pay-as-you-go USDC topups (any amount, credited at 1,000 ops per $1) and decreased by one per `budget_clear`. Your LLM token spend is billed by your provider, not here; per-agent spend caps are separate — see `set_envelope`. Returns {operations_remaining:number}.',
       inputSchema: {},
       annotations: {
         title: 'Get governance-operation quota',

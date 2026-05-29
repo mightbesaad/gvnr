@@ -50,10 +50,10 @@ curl -X POST https://gvnr.dev/v1/account
 
 ### 2. Top up your governance-op quota
 
-Pay-as-you-go: **~1,000 ops per $1**, any amount, USDC on Base. Open the pay page and pass your API key:
+Pay-as-you-go: **1,000 ops per $1**, any amount (try the whole rail for **$1**), USDC on Base. Open the pay page, name your amount, and pass your API key:
 
 ```
-https://gvnr.dev/pay/starter?api_key=bg_YOUR_KEY
+https://gvnr.dev/pay?usd=1&api_key=bg_YOUR_KEY
 ```
 
 Send USDC to the address shown and paste your tx hash — ops are credited proportional to the amount received, after on-chain verification. Programmatic clients can submit the hash directly:
@@ -63,8 +63,8 @@ curl -X POST \
   -H "Authorization: Bearer bg_YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{"tx_hash":"0x..."}' \
-  https://gvnr.dev/v1/account/topup-verify/starter
-# { "operations_remaining": 19000, "credited_ops": 19000, "credited_usd": 19 }
+  https://gvnr.dev/v1/account/topup-verify
+# { "operations_remaining": 1000, "credited_ops": 1000, "credited_usd": 1 }
 ```
 
 Or settle in one round-trip with an x402 client (Base MCP, AgentKit, x402-fetch) — name your own amount:
@@ -225,13 +225,14 @@ Denial reasons: `no_credits` (op quota exhausted) · `no_envelope` (agent has no
 
 Gvnr charges for **governance operations**, not LLM usage. Your model tokens are billed by your provider; Gvnr never sees them.
 
-Top-ups are **pay-as-you-go at ~1,000 ops/$1** in USDC on Base mainnet — send any amount and ops are credited proportionally after on-chain verification. The named packs below are just convenient presets:
+Top-ups are **pay-as-you-go at 1,000 ops/$1** in USDC on Base mainnet — name any amount on [`/pay`](https://gvnr.dev/pay) and ops are credited proportionally after on-chain verification. No minimum, no subscription; the amounts below are just one-tap presets:
 
-| Preset | Price | Governance ops | Link |
-|---|---|---|---|
-| `starter` | $19 | 19,000 | `/pay/starter` |
-| `growth` | $39 | 39,000 | `/pay/growth` |
-| `studio` | $79 | 79,000 | `/pay/studio` |
+| Amount | Governance ops | Link |
+|---|---|---|
+| $1 (trial) | 1,000 | `/pay?usd=1` |
+| $19 | 19,000 | `/pay?usd=19` |
+| $39 | 39,000 | `/pay?usd=39` |
+| $79 | 79,000 | `/pay?usd=79` |
 
 Works with Base MCP, AgentKit, and any x402 client.
 
@@ -265,12 +266,7 @@ Embedding / input-only models are billed on input tokens — pass input tokens a
 
 ## Network
 
-| `X402_NETWORK` | Chain | Notes |
-|---|---|---|
-| `eip155:84532` | Base Sepolia | Testnet — safe for development |
-| `eip155:8453` | Base mainnet | Real USDC |
-
-Current deployment: **Base mainnet**.
+Runs on **Base mainnet** (`X402_NETWORK=eip155:8453`), settling real USDC. There's no minimum to try it: top up as little as **$1** (1,000 governance ops) to exercise the full live rail end-to-end — no testnet needed.
 
 ---
 

@@ -21,8 +21,17 @@ export const NETWORK_CONFIGS = {
 
 export type NetworkKey = keyof typeof NETWORK_CONFIGS;
 
+// Cents-safe USD -> raw USDC (6dp). BigInt(amountUsd) throws on any fractional dollar
+// (e.g. BigInt(1.5) RangeErrors), so go via whole cents: round to cents, then scale by the
+// remaining 4 decimals. Handles custom amounts like $1.50 that the pay page now allows.
+export function usdToRawAmount(amountUsd: number): bigint {
+  const cents = BigInt(Math.round(amountUsd * 100));
+  return cents * BigInt(10 ** (USDC_DECIMALS - 2));
+}
+
+// Back-compat alias for whole-dollar preset amounts.
 export function packToRawAmount(amountUsd: number): bigint {
-  return BigInt(amountUsd) * BigInt(10 ** USDC_DECIMALS);
+  return usdToRawAmount(amountUsd);
 }
 
 function padAddress(address: string): string {

@@ -59,15 +59,29 @@ describe('GET /health', () => {
 });
 
 describe('GET /', () => {
-  it('returns HTML status page', async () => {
+  it('returns the HTML product page', async () => {
     const res = await SELF.fetch('http://localhost/');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     const text = await res.text();
-    expect(text).toContain('Gvnr');
+    expect(text).toContain('Economic control');
     expect(text).toContain('budget_clear');
     expect(text).toContain('not after the invoice');
-    expect(text).toContain('x402 ·');
+    expect(text).toContain('Governance stream');
+    // The retired USD credit-pool framing must not reappear.
+    expect(text).not.toContain('credit pool');
+  });
+});
+
+describe('GET /status', () => {
+  it('returns the operational status page', async () => {
+    const res = await SELF.fetch('http://localhost/status');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const text = await res.text();
+    expect(text).toContain('All systems operational');
+    expect(text).toContain('MCP endpoint');
+    expect(text).toContain('1.7.0');
   });
 });
 
@@ -1442,6 +1456,31 @@ describe('GET /pay/:pack', () => {
   });
 });
 
+describe('GET /pay (custom amount)', () => {
+  it('renders the amount-first page and prefills ?usd=', async () => {
+    const res = await SELF.fetch('http://localhost/pay?usd=7');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const html = await res.text();
+    expect(html).toContain('Choose an amount');
+    expect(html).toContain('governance ops');
+    expect(html).toContain('value="7"');
+    expect(html).toContain(PAYTO);
+  });
+
+  it('falls back to a default amount with no ?usd=', async () => {
+    const res = await SELF.fetch('http://localhost/pay');
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('value="5"');
+  });
+
+  it('blocks XSS via malformed api_key', async () => {
+    const res = await SELF.fetch('http://localhost/pay?usd=5&api_key=x%22%3E%3Cscript%3E');
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('POST /v1/account/topup-verify/:pack', () => {
   const VALID_TX = '0x' + 'a'.repeat(64);
 
@@ -1467,15 +1506,19 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     expect((await res.json<{ error: string }>()).error).toBe('invalid_tx_hash');
   });
 
-  it('returns 400 for invalid pack', async () => {
+  it('pack-less route /v1/account/topup-verify credits proportionally (custom amount)', async () => {
+    const TX = '0x' + '7'.repeat(64);
+    stubRpc(makeReceipt(PAYTO, 3_500_000n)); // $3.50 custom amount
     const { apiKey } = await provisionAccount();
-    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/fake', {
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_hash: VALID_TX }),
+      body: JSON.stringify({ tx_hash: TX }),
     });
-    expect(res.status).toBe(400);
-    expect((await res.json<{ error: string }>()).error).toBe('invalid_pack');
+    expect(res.status).toBe(200);
+    const body = await res.json<{ credited_ops: number; credited_usd: number }>();
+    expect(body.credited_ops).toBe(3_500); // $3.50 × 1,000 ops/$
+    expect(body.credited_usd).toBe(3.5);
   });
 
   it('returns 200 with already_credited for already-used tx hash (idempotent)', async () => {
@@ -1487,9 +1530,8 @@ describe('POST /v1/account/topup-verify/:pack', () => {
       body: JSON.stringify({ tx_hash: VALID_TX }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json<{ operations_remaining: number; pack: string; already_credited: boolean }>();
+    const body = await res.json<{ operations_remaining: number; already_credited: boolean }>();
     expect(body.already_credited).toBe(true);
-    expect(body.pack).toBe('starter');
     expect(typeof body.operations_remaining).toBe('number');
   });
 
