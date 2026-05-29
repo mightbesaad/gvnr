@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AccountConfigRecord, Env } from '../lib/types';
 import { hashApiKey } from '../lib/kv';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
-import { PACKS, type PackName } from '../lib/x402';
+import { PACKS, type PackName, parseTopupUsd } from '../lib/x402';
 import { opsForUsd } from '../lib/models';
 
 type Variables = AuthVariables;
@@ -83,6 +83,25 @@ account.delete('/notification-email', authMiddleware, async (c) => {
     await c.env.BUDGET_KV.put(accountConfigKey(accountId), JSON.stringify(next));
   }
   return c.json({ ok: true });
+});
+
+// POST /v1/account/topup?usd=<dollars> — x402-gated pay-as-you-go top-up (name your amount).
+// The x402 middleware (index.ts) intercepts first: returns 402 if unpaid, calls next() once the
+// payment is verified against a challenge built for exactly `?usd=`. We re-parse the same param
+// through the shared canonicalizer, so credited ops are bound to the verified (exact-scheme)
+// authorization amount — never to an unverified client claim.
+account.post('/topup', authMiddleware, async (c) => {
+  const parsed = parseTopupUsd(c.req.query('usd'));
+  if (!parsed.ok) {
+    return c.json({ error: parsed.error, retryable: false, hint: parsed.hint }, 400);
+  }
+
+  const accountId = c.get('accountId');
+  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
+  const ops = opsForUsd(parsed.usd);
+  const result = await stub.credit(ops);
+
+  return c.json({ operations_remaining: result.operations_remaining, credited_ops: ops, credited_usd: parsed.usd });
 });
 
 // POST /v1/account/topup/:pack — x402-gated credit top-up

@@ -1,5 +1,6 @@
 import { env, SELF } from 'cloudflare:test';
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { parseTopupUsd, MIN_TOPUP_USD, MAX_TOPUP_USD } from '../src/lib/x402';
 
 // ── RPC mock helpers ─────────────────────────────────────────────────────────
 
@@ -152,6 +153,106 @@ describe('POST /v1/account/topup/:pack', () => {
     expect(res.status).toBe(400);
     const body = await res.json<{ error: string }>();
     expect(body.error).toBe('invalid_pack');
+  });
+});
+
+describe('POST /v1/account/topup?usd= (pay-as-you-go)', () => {
+  // The payment-required header is base64(JSON.stringify(paymentRequired)). Decoding it lets
+  // us assert the 402 challenge was built for the exact amount the caller named — proving the
+  // dynamic price function actually flows ?usd= through into the on-chain quote.
+  function decodePaymentRequired(header: string): unknown {
+    return JSON.parse(atob(header));
+  }
+
+  it('returns 402 with a payment-required header quoting the named amount', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup?usd=5', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(res.status).toBe(402);
+    const header = res.headers.get('payment-required');
+    expect(header).toBeTruthy();
+    // $5 USDC at 6 decimals = 5000000 atomic units — must appear in the decoded challenge.
+    expect(JSON.stringify(decodePaymentRequired(header!))).toContain('5000000');
+  });
+
+  it('quotes a different amount for a different ?usd= (dynamic price, not a fixed route)', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup?usd=7', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(res.status).toBe(402);
+    const header = res.headers.get('payment-required');
+    expect(JSON.stringify(decodePaymentRequired(header!))).toContain('7000000');
+  });
+
+  it('returns 400 below_minimum for amounts under $1 (no 402 challenge built)', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup?usd=0.5', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string; retryable: boolean }>();
+    expect(body.error).toBe('below_minimum');
+    expect(body.retryable).toBe(false);
+  });
+
+  it('returns 400 above_maximum for amounts over the cap', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup?usd=20000', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toBe('above_maximum');
+  });
+
+  it('returns 400 invalid_amount when ?usd= is missing', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toBe('invalid_amount');
+  });
+
+  it('returns 400 invalid_amount when ?usd= is not a number', async () => {
+    const { apiKey } = await provisionAccount();
+    const res = await SELF.fetch('http://localhost/v1/account/topup?usd=abc', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toBe('invalid_amount');
+  });
+});
+
+describe('parseTopupUsd (canonicalizer — single source for challenge price + credited ops)', () => {
+  it('rounds to whole cents so the price fn and handler resolve one value', () => {
+    expect(parseTopupUsd('5.129')).toEqual({ ok: true, usd: 5.13 });
+    expect(parseTopupUsd('5')).toEqual({ ok: true, usd: 5 });
+    expect(parseTopupUsd('19.005')).toEqual({ ok: true, usd: 19.01 });
+  });
+
+  it('enforces the min/max bounds', () => {
+    expect(parseTopupUsd(String(MIN_TOPUP_USD))).toEqual({ ok: true, usd: MIN_TOPUP_USD });
+    expect(parseTopupUsd('0.99')).toMatchObject({ ok: false, error: 'below_minimum' });
+    expect(parseTopupUsd(String(MAX_TOPUP_USD))).toEqual({ ok: true, usd: MAX_TOPUP_USD });
+    expect(parseTopupUsd(String(MAX_TOPUP_USD + 1))).toMatchObject({ ok: false, error: 'above_maximum' });
+  });
+
+  it('rejects missing, non-numeric, and array inputs', () => {
+    expect(parseTopupUsd(undefined)).toMatchObject({ ok: false, error: 'invalid_amount' });
+    expect(parseTopupUsd('abc')).toMatchObject({ ok: false, error: 'invalid_amount' });
+    expect(parseTopupUsd('-5')).toMatchObject({ ok: false, error: 'invalid_amount' });
+    expect(parseTopupUsd(['5', '7'])).toMatchObject({ ok: false, error: 'invalid_amount' });
   });
 });
 
@@ -1193,23 +1294,23 @@ describe('Agent Approval Bridge', () => {
 // ── Brand surface: MCP card and homepage reflect Slot 5 rename ───────────────
 
 describe('Slot 5 brand surface', () => {
-  it('mcp.json card name is "Gvnr" and version 1.6.0', async () => {
+  it('mcp.json card name is "Gvnr" and version 1.7.0', async () => {
     const res = await SELF.fetch('http://localhost/.well-known/mcp.json');
     expect(res.status).toBe(200);
     const body = await res.json<{ name: string; version: string; tools: { name: string }[] }>();
     expect(body.name).toBe('Gvnr');
-    expect(body.version).toBe('1.6.0');
+    expect(body.version).toBe('1.7.0');
     const toolNames = body.tools.map((t) => t.name);
     expect(toolNames).toContain('request_approval');
     expect(toolNames).toContain('check_approval');
   });
 
-  it('openapi.json title is "Gvnr" and version 1.6.0', async () => {
+  it('openapi.json title is "Gvnr" and version 1.7.0', async () => {
     const res = await SELF.fetch('http://localhost/openapi.json');
     expect(res.status).toBe(200);
     const body = await res.json<{ info: { title: string; version: string }; paths: Record<string, unknown> }>();
     expect(body.info.title).toBe('Gvnr');
-    expect(body.info.version).toBe('1.6.0');
+    expect(body.info.version).toBe('1.7.0');
     expect(body.paths['/v1/approval/request']).toBeDefined();
     expect(body.paths['/v1/approval/check/{approval_id}']).toBeDefined();
   });

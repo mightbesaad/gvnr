@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
+import type { Context, Next } from 'hono';
 import type { Env } from './lib/types';
-import { buildX402Middleware } from './lib/x402';
+import { buildX402Middleware, parseTopupUsd } from './lib/x402';
 import { mcpHandler } from './routes/mcp';
 import accountRoutes from './routes/account';
 import envelopeRoutes from './routes/envelope';
@@ -149,7 +150,7 @@ app.get('/.well-known/mcp.json', (c) => {
   return c.json({
     name: 'Gvnr',
     description: 'x402-paying AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges. One MCP endpoint, one credit pool, settled via x402 (USDC on Base).',
-    version: '1.6.0',
+    version: '1.7.0',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
     authentication: {
@@ -210,7 +211,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Gvnr', version: '1.6.0', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
+    info: { title: 'Gvnr', version: '1.7.0', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
@@ -655,6 +656,31 @@ app.get('/openapi.json', (c) => {
           parameters: [{ name: 'approval_id', in: 'path', required: true, schema: { type: 'string' } }],
           requestBody: { content: { 'application/x-www-form-urlencoded': { schema: { type: 'object', properties: { decision: { type: 'string', enum: ['approved', 'denied'] } }, required: ['decision'] } } } },
           responses: { '200': { description: 'HTML confirmation page' } },
+        },
+      },
+      '/v1/account/topup': {
+        post: {
+          summary: 'x402-gated pay-as-you-go top-up — name your own USD amount; pays on-chain via x402 and credits the account in one round-trip',
+          description: 'Pay-as-you-go: pass ?usd=<dollars> (min $1, max $100). Returns 402 Payment Required with x402 headers quoting exactly that amount if no payment is present; pair with an x402 client which signs payment and re-requests automatically. Credits floor(usd × 1000) governance ops. For fixed preset amounts, use POST /v1/account/topup/{pack} instead.',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'usd', in: 'query', required: true, schema: { type: 'number', minimum: 1, maximum: 100 }, description: 'Top-up amount in USD (canonicalized to whole cents)' }],
+          responses: {
+            '200': {
+              description: 'Payment verified, credits applied',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                required: ['operations_remaining', 'credited_ops', 'credited_usd'],
+                properties: {
+                  operations_remaining: { type: 'integer', description: 'Governance operations remaining after credit' },
+                  credited_ops: { type: 'integer', description: 'Governance operations granted (floor(usd × 1000))' },
+                  credited_usd: { type: 'number', description: 'USD amount credited (the quoted, verified amount)' },
+                },
+              } } },
+            },
+            '400': { description: 'Error (invalid_amount, below_minimum, above_maximum)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+            '402': { description: 'Payment Required — x402 headers contain the payment instructions (network, asset, amount, payto address)' },
+            default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          },
         },
       },
       '/v1/account/topup/{pack}': {
@@ -1347,9 +1373,9 @@ app.route('/', payRoutes);
 app.route('/tos', tosRoutes);
 app.route('/b2b', b2bRoutes);
 
-// x402 payment gate — must run before account routes so topup/:pack sees payment verification.
+// x402 payment gate — must run before account routes so topup sees payment verification.
 // Initialized lazily on first request so PAYTO_ADDRESS is available from env.
-app.use('/v1/account/topup/*', async (c, next) => {
+const x402Gate = async (c: Context<{ Bindings: Env }>, next: Next) => {
   const middleware = buildX402Middleware(
     c.env.PAYTO_ADDRESS,
     c.env.X402_NETWORK,
@@ -1357,6 +1383,22 @@ app.use('/v1/account/topup/*', async (c, next) => {
     c.env.CDP_API_KEY_SECRET,
   );
   return middleware(c, next);
+};
+
+// Preset packs (POST /v1/account/topup/:pack) — fixed amounts, gated directly. Use a required
+// :pack segment (NOT /*) so this gate does NOT also match the bare pay-as-you-go path below —
+// otherwise it would intercept and 402 before the bare-path amount validation could run.
+app.use('/v1/account/topup/:pack', x402Gate);
+
+// Pay-as-you-go (POST /v1/account/topup?usd=<dollars>) — bare path. Validate the amount BEFORE
+// the x402 gate builds a challenge, so an invalid or below-minimum amount returns a clean 400
+// instead of a 402 quoting a bogus price.
+app.use('/v1/account/topup', async (c, next) => {
+  const parsed = parseTopupUsd(c.req.query('usd'));
+  if (!parsed.ok) {
+    return c.json({ error: parsed.error, retryable: false, hint: parsed.hint }, 400);
+  }
+  return x402Gate(c, next);
 });
 
 app.route('/v1/account', accountRoutes);
