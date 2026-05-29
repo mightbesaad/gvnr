@@ -16,7 +16,7 @@ pay.get('/v1/packs/:pack/info', async (c) => {
 
   const network = c.env.X402_NETWORK as NetworkKey;
   const cfg = NETWORK_CONFIGS[network];
-  if (!cfg) return c.json({ error: 'misconfigured_network' }, 500);
+  if (!cfg) return c.json({ error: 'misconfigured_network', retryable: false, hint: 'Server network configuration error — retrying will not help; contact support.' }, 500);
 
   return c.json({
     pack: packName,
@@ -39,12 +39,12 @@ pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
   const body = await c.req.json<{ tx_hash?: string }>();
   const txHash = body.tx_hash?.trim();
   if (!txHash || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
-    return c.json({ error: 'invalid_tx_hash' }, 400);
+    return c.json({ error: 'invalid_tx_hash', retryable: false, hint: 'tx_hash must be 0x-prefixed with 64 hex chars.' }, 400);
   }
 
   const network = c.env.X402_NETWORK as NetworkKey;
   const cfg = NETWORK_CONFIGS[network];
-  if (!cfg) return c.json({ error: 'misconfigured_network' }, 500);
+  if (!cfg) return c.json({ error: 'misconfigured_network', retryable: false, hint: 'Server network configuration error — retrying will not help; contact support.' }, 500);
 
   const txKey = `used_tx:${cfg.chainId}:${txHash.toLowerCase()}`;
   const accountId = c.get('accountId');

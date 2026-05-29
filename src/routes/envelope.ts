@@ -17,13 +17,13 @@ envelope.put('/', async (c) => {
   const window = body.window ?? 'daily';
 
   if (typeof body.agent_id !== 'string' || !body.agent_id || body.agent_id.length > 128) {
-    return c.json({ error: 'invalid_params', detail: 'agent_id must be a non-empty string, max 128 chars' }, 400);
+    return c.json({ error: 'invalid_params', required: ['agent_id (non-empty string, max 128 chars)'] }, 400);
   }
   if (typeof body.limit_usd !== 'number' || !Number.isFinite(body.limit_usd) || body.limit_usd <= 0 || body.limit_usd > 1_000_000) {
     return c.json({ error: 'invalid_params', required: ['agent_id', 'limit_usd'] }, 400);
   }
   if (window !== 'daily' && window !== 'session') {
-    return c.json({ error: 'invalid_params', detail: 'window must be "daily" or "session"' }, 400);
+    return c.json({ error: 'invalid_params', required: ['window ("daily" or "session", optional)'] }, 400);
   }
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
   const existing = await stub.getEnvelope(body.agent_id);
@@ -46,7 +46,7 @@ envelope.get('/:agent_id', async (c) => {
   const env = await stub.getEnvelope(agentId);
 
   if (!env) {
-    return c.json({ error: 'not_found' }, 404);
+    return c.json({ error: 'not_found', retryable: false, hint: 'No spend envelope for this agent. Create one via PUT /v1/budget/envelope.' }, 404);
   }
 
   return c.json({
@@ -67,7 +67,7 @@ envelope.delete('/:agent_id', async (c) => {
   const deleted = await stub.deleteEnvelope(agentId);
 
   if (!deleted) {
-    return c.json({ error: 'not_found' }, 404);
+    return c.json({ error: 'not_found', retryable: false, hint: 'No spend envelope to delete for this agent.' }, 404);
   }
 
   return c.json({ success: true, agent_id: agentId });

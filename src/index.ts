@@ -20,10 +20,10 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.onError((err, c) => {
   if (err instanceof SyntaxError) {
-    return c.json({ error: 'invalid_json' }, 400);
+    return c.json({ error: 'invalid_json', retryable: false, hint: 'Request body must be valid JSON.' }, 400);
   }
   console.error(err);
-  return c.json({ error: 'internal_error' }, 500);
+  return c.json({ error: 'internal_error', retryable: true, hint: 'Transient server error — safe to retry.' }, 500);
 });
 
 app.get('/health', (c) => c.json({ ok: true }));
@@ -149,7 +149,7 @@ app.get('/.well-known/mcp.json', (c) => {
   return c.json({
     name: 'Gvnr',
     description: 'x402-paying AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges. One MCP endpoint, one credit pool, settled via x402 (USDC on Base).',
-    version: '1.5.2',
+    version: '1.5.3',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
     authentication: {
@@ -210,7 +210,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Gvnr', version: '1.5.2', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
+    info: { title: 'Gvnr', version: '1.5.3', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
@@ -227,7 +227,8 @@ app.get('/openapi.json', (c) => {
             detail: { type: 'string', description: 'Additional context for the error' },
             valid: { type: 'array', items: { type: 'string' }, description: 'Allowed values when input was rejected as out-of-set' },
             valid_channels: { type: 'array', items: { type: 'string' }, description: 'Allowed notification channels (for approval requests)' },
-            retry_after: { type: 'string', description: 'Soft retry hint (e.g. "next_minute", "next_hour")' },
+            retryable: { type: 'boolean', description: 'Whether retrying the same request can succeed. false = fix input / auth / config first, or terminal. Omitted when retryability is already implied by required/valid (fix the input) or retry_after_ms (wait, then retry).' },
+            retry_after_ms: { type: 'integer', description: 'Milliseconds to wait before retrying — present on rate_limited (429). Matches the runtime rate_check field.' },
             limit: { type: 'string', description: 'Description of the limit that was hit' },
           },
         },
@@ -1321,7 +1322,7 @@ function closeKeyModal() {
 app.post('/v1/admin/seed', async (c) => {
   const secret = c.req.header('X-Admin-Secret');
   if (!secret || secret !== c.env.ADMIN_SECRET) {
-    return c.json({ error: 'unauthorized' }, 401);
+    return c.json({ error: 'unauthorized', retryable: false, hint: 'Admin endpoint — a valid X-Admin-Secret header is required.' }, 401);
   }
 
   const body = await c.req.json<{ api_key: string; amount_usd: number }>();
@@ -1331,7 +1332,7 @@ app.post('/v1/admin/seed', async (c) => {
 
   const account = await getAccount(c.env.BUDGET_KV, body.api_key);
   if (!account) {
-    return c.json({ error: 'account_not_found' }, 404);
+    return c.json({ error: 'account_not_found', retryable: false, hint: 'No account for this api_key. Provision one via POST /v1/account.' }, 404);
   }
 
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(account.account_id));

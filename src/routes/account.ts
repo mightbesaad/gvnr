@@ -24,7 +24,7 @@ account.post('/', async (c) => {
   const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
   const { success } = await c.env.ACCOUNT_RATE_LIMITER.limit({ key: ip });
   if (!success) {
-    return c.json({ error: 'rate_limited', retry_after: 'next_hour' }, 429);
+    return c.json({ error: 'rate_limited', retryable: true, retry_after_ms: 3_600_000, hint: 'Per-IP account-creation throttle. Retry after the window.' }, 429);
   }
 
   const accountId = crypto.randomUUID();

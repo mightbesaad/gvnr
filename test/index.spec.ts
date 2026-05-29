@@ -106,9 +106,13 @@ describe('POST /v1/account', () => {
 });
 
 describe('GET /v1/account/balance', () => {
-  it('returns 401 without auth', async () => {
+  it('returns 401 without auth, carrying retryable=false and a recovery hint', async () => {
     const res = await SELF.fetch('http://localhost/v1/account/balance');
     expect(res.status).toBe(401);
+    const body = await res.json<{ error: string; retryable: boolean; hint: string }>();
+    expect(body.error).toBe('missing_api_key');
+    expect(body.retryable).toBe(false);
+    expect(body.hint).toContain('POST /v1/account');
   });
 
   it('returns balance for valid key', async () => {
@@ -1182,23 +1186,23 @@ describe('Agent Approval Bridge', () => {
 // ── Brand surface: MCP card and homepage reflect Slot 5 rename ───────────────
 
 describe('Slot 5 brand surface', () => {
-  it('mcp.json card name is "Gvnr" and version 1.5.2', async () => {
+  it('mcp.json card name is "Gvnr" and version 1.5.3', async () => {
     const res = await SELF.fetch('http://localhost/.well-known/mcp.json');
     expect(res.status).toBe(200);
     const body = await res.json<{ name: string; version: string; tools: { name: string }[] }>();
     expect(body.name).toBe('Gvnr');
-    expect(body.version).toBe('1.5.2');
+    expect(body.version).toBe('1.5.3');
     const toolNames = body.tools.map((t) => t.name);
     expect(toolNames).toContain('request_approval');
     expect(toolNames).toContain('check_approval');
   });
 
-  it('openapi.json title is "Gvnr" and version 1.5.2', async () => {
+  it('openapi.json title is "Gvnr" and version 1.5.3', async () => {
     const res = await SELF.fetch('http://localhost/openapi.json');
     expect(res.status).toBe(200);
     const body = await res.json<{ info: { title: string; version: string }; paths: Record<string, unknown> }>();
     expect(body.info.title).toBe('Gvnr');
-    expect(body.info.version).toBe('1.5.2');
+    expect(body.info.version).toBe('1.5.3');
     expect(body.paths['/v1/approval/request']).toBeDefined();
     expect(body.paths['/v1/approval/check/{approval_id}']).toBeDefined();
   });

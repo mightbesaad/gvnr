@@ -51,7 +51,7 @@ rate.get('/envelope/:agent_id/:provider/:model', async (c) => {
 
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
   const env = await stub.getRateEnvelope(agent_id, provider, model);
-  if (!env) return c.json({ error: 'not_found' }, 404);
+  if (!env) return c.json({ error: 'not_found', retryable: false, hint: 'No rate envelope for this (agent, provider, model). Create one via PUT /v1/rate/envelope.' }, 404);
 
   return c.json({
     agent_id,
@@ -72,7 +72,7 @@ rate.delete('/envelope/:agent_id/:provider/:model', async (c) => {
 
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
   const existed = await stub.deleteRateEnvelope(agent_id, provider, model);
-  if (!existed) return c.json({ error: 'not_found' }, 404);
+  if (!existed) return c.json({ error: 'not_found', retryable: false, hint: 'No rate envelope to delete for this (agent, provider, model).' }, 404);
 
   return c.json({ success: true, agent_id, provider, model });
 });

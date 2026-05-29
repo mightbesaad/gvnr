@@ -153,7 +153,7 @@ approval.post('/request', async (c) => {
   // pool we don't want one account to drain. 30/min is generous for legitimate use.
   const { success } = await c.env.APPROVAL_RATE_LIMITER.limit({ key: `req:${accountId}` });
   if (!success) {
-    return c.json({ error: 'rate_limited', retry_after: 'next_minute', limit: '30 request_approval calls per minute' }, 429);
+    return c.json({ error: 'rate_limited', retryable: true, retry_after_ms: 60_000, limit: '30 request_approval calls per minute' }, 429);
   }
 
   const body = await c.req.json<{

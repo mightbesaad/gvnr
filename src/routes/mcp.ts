@@ -157,7 +157,7 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'rate_check',
     {
-      description: 'Check the rate-limit envelope for an (agent_id, provider, model) triple before making an LLM call. Returns {allowed:true, requests_remaining_this_minute} if under cap (and increments the counter), or {allowed:false, retry_after_seconds} if over. Pairs with `set_rate_envelope` (which must be called first) and typically follows `budget_clear` in the request prologue: clear → rate_check → LLM call → reconcile. Not idempotent — each call counts as one request.',
+      description: 'Check the rate-limit envelope for an (agent_id, provider, model) triple before making an LLM call. Returns {allowed:true, requests_remaining_this_minute} if under cap (and increments the counter), or {allowed:false, reason:"rate_exceeded", retry_after_ms} if over. Pairs with `set_rate_envelope` (which must be called first) and typically follows `budget_clear` in the request prologue: clear → rate_check → LLM call → reconcile. Not idempotent — each call counts as one request.',
       inputSchema: {
         agent_id: z.string().max(128).describe('The agent identifier'),
         provider: z.string().max(64).describe('Provider name, e.g. anthropic, openai'),
