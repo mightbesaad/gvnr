@@ -7,10 +7,13 @@ import type { MiddlewareHandler } from 'hono';
 
 const FALLBACK_FACILITATOR_URL = 'https://x402.org/facilitator';
 
+// `ops` = governance operations granted (one per budget_clear). This is gvnr's revenue
+// unit — flat per-op quota, decoupled from the customer's LLM spend (which they pay their
+// provider directly). Bigger packs price each op lower: $0.0019 / $0.0013 / $0.00079.
 export const PACKS = {
-  starter: { amount_usd: 19, description: 'Starter — ~10k tool calls/month' },
-  growth:  { amount_usd: 39, description: 'Growth — ~30k tool calls/month' },
-  studio:  { amount_usd: 79, description: 'Studio — ~100k tool calls/month' },
+  starter: { amount_usd: 19, ops: 10_000,  description: 'Starter — 10k governance ops/month' },
+  growth:  { amount_usd: 39, ops: 30_000,  description: 'Growth — 30k governance ops/month' },
+  studio:  { amount_usd: 79, ops: 100_000, description: 'Studio — 100k governance ops/month' },
 } as const;
 
 export type PackName = keyof typeof PACKS;

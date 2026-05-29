@@ -36,12 +36,12 @@ account.post('/', async (c) => {
   return c.json({ api_key: apiKey, account_id: accountId }, 201);
 });
 
-// GET /v1/account/balance — current credit balance
+// GET /v1/account/balance — remaining governance-operation quota
 account.get('/balance', authMiddleware, async (c) => {
   const accountId = c.get('accountId');
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
-  const balance = await stub.getBalance();
-  return c.json({ balance_usd: balance });
+  const operations = await stub.getOperations();
+  return c.json({ operations_remaining: operations });
 });
 
 // POST /v1/account/notification-email — set the address Gvnr emails when request_approval fires
@@ -97,9 +97,9 @@ account.post('/topup/:pack', authMiddleware, async (c) => {
 
   const accountId = c.get('accountId');
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
-  const result = await stub.credit(pack.amount_usd);
+  const result = await stub.credit(pack.ops);
 
-  return c.json({ balance_usd: result.balance_usd, pack: packName, credited: pack.amount_usd });
+  return c.json({ operations_remaining: result.operations_remaining, pack: packName, credited_ops: pack.ops });
 });
 
 export default account;

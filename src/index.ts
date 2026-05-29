@@ -13,6 +13,7 @@ import payRoutes from './routes/pay';
 import tosRoutes from './routes/tos';
 import b2bRoutes from './routes/b2b';
 import { getAccount } from './lib/kv';
+import { renderPriceTable } from './lib/models';
 export { AccountState } from './lib/account-do';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -80,14 +81,14 @@ app.get('/.well-known/agent-skills/index.json', (c) => {
       {
         name: 'get_balance',
         type: 'mcp',
-        description: 'Get the current credit balance in USD for this account.',
+        description: 'Get the remaining governance-operation quota for this account (one budget_clear = one op).',
         url: 'https://gvnr.dev/mcp',
         sha256: '5f0e5e27eb2d2e1dd303892eb46edea7e6987524284e5f646e739300e9bc355f',
       },
       {
         name: 'reconcile',
         type: 'mcp',
-        description: 'Reconcile a previous budget_clear with actual usage from the LLM response. Applies the drift (actual minus estimated cost) to the agent envelope and account balance.',
+        description: 'Reconcile a previous budget_clear with actual usage from the LLM response. Applies the drift (actual minus estimated cost) to the agent envelope (the spend cap). The governance-operation quota is not affected.',
         url: 'https://gvnr.dev/mcp',
         sha256: '0fabe12e7ca5a969b3726e6fa1943e911e91b85a7580fc6bd1ec30720ef5d62e',
       },
@@ -168,12 +169,12 @@ app.get('/.well-known/mcp.json', (c) => {
       },
       {
         name: 'get_balance',
-        description: 'Get current account credit balance in USD',
-        annotations: { title: 'Get account credit balance', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        description: 'Get the remaining governance-operation quota for this account',
+        annotations: { title: 'Get governance-operation quota', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       },
       {
         name: 'reconcile',
-        description: 'Reconcile a prior budget_clear with actual usage; applies the drift to envelope and balance',
+        description: 'Reconcile a prior budget_clear with actual usage; applies the drift to the agent envelope (spend cap)',
         annotations: { title: 'Reconcile a clearance with actual usage', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       },
       {
@@ -258,15 +259,15 @@ app.get('/openapi.json', (c) => {
       },
       '/v1/account/balance': {
         get: {
-          summary: 'Get credit balance',
+          summary: 'Get governance-operation quota',
           security: [{ bearerAuth: [] }],
           responses: {
             '200': {
-              description: 'Current account-level credit balance in USD',
+              description: 'Remaining governance operations on the account',
               content: { 'application/json': { schema: {
                 type: 'object',
-                required: ['balance_usd'],
-                properties: { balance_usd: { type: 'number', description: 'Current credit balance in USD' } },
+                required: ['operations_remaining'],
+                properties: { operations_remaining: { type: 'integer', description: 'Governance operations remaining (one budget_clear = one op)' } },
               } } },
             },
             default: { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
@@ -284,11 +285,11 @@ app.get('/openapi.json', (c) => {
               description: 'Credits applied (or already_credited=true if tx was previously verified)',
               content: { 'application/json': { schema: {
                 type: 'object',
-                required: ['balance_usd', 'pack', 'credited'],
+                required: ['operations_remaining', 'pack'],
                 properties: {
-                  balance_usd: { type: 'number', description: 'New account balance after credit' },
+                  operations_remaining: { type: 'integer', description: 'Governance operations remaining after credit' },
                   pack: { type: 'string', enum: ['starter', 'growth', 'studio'] },
-                  credited: { type: 'number', description: 'USD amount credited from the pack' },
+                  credited_ops: { type: 'integer', description: 'Governance operations granted by this pack' },
                   already_credited: { type: 'boolean', description: 'True if this tx_hash was previously verified (idempotent replay)' },
                 },
               } } },
@@ -319,7 +320,8 @@ app.get('/openapi.json', (c) => {
                 properties: {
                   approved: { type: 'boolean', description: 'True if the call is authorized; false if denied' },
                   remaining_usd: { type: 'number', description: 'USD remaining on the agent envelope after this clearance (0 if denied for no_credits/no_envelope)' },
-                  reason: { type: 'string', enum: ['no_credits', 'no_envelope', 'envelope_exceeded'], description: 'Present only when approved=false' },
+                  operations_remaining: { type: 'integer', description: 'Governance operations remaining after this clearance (present when approved=true)' },
+                  reason: { type: 'string', enum: ['no_credits', 'no_envelope', 'envelope_exceeded'], description: 'Present only when approved=false. no_credits = governance quota exhausted' },
                 },
               } } },
             },
@@ -329,7 +331,7 @@ app.get('/openapi.json', (c) => {
       },
       '/v1/budget/reconcile': {
         post: {
-          summary: 'Reconcile a prior clearance with actual LLM usage; applies drift to envelope and balance',
+          summary: 'Reconcile a prior clearance with actual LLM usage; applies drift to the agent envelope (spend cap)',
           security: [{ bearerAuth: [] }],
           requestBody: { content: { 'application/json': { schema: {
             type: 'object',
@@ -342,15 +344,15 @@ app.get('/openapi.json', (c) => {
           } } } },
           responses: {
             '200': {
-              description: 'Drift applied — envelope and balance corrected by (actual − estimated). warning="drift_exceeds_2x_threshold" when actual cost was >2× the estimate',
+              description: 'Drift applied — the agent envelope (spend cap) corrected by (actual − estimated). warning="drift_exceeds_2x_threshold" when actual cost was >2× the estimate',
               content: { 'application/json': { schema: {
                 type: 'object',
-                required: ['ok', 'drift_usd', 'remaining_usd', 'balance_usd'],
+                required: ['ok', 'drift_usd', 'remaining_usd', 'operations_remaining'],
                 properties: {
                   ok: { type: 'boolean', description: 'Always true on 200; false outcomes return 400' },
-                  drift_usd: { type: 'number', description: 'Signed: positive if actual > estimated (more debited), negative if actual < estimated (credit returned)' },
+                  drift_usd: { type: 'number', description: 'Signed: positive if actual > estimated, negative if actual < estimated. Adjusts the spend cap only' },
                   remaining_usd: { type: 'number', description: 'USD remaining on the agent envelope after drift applied' },
-                  balance_usd: { type: 'number', description: 'New account-level balance after drift applied' },
+                  operations_remaining: { type: 'integer', description: 'Governance operations remaining (unchanged by reconcile)' },
                   warning: { type: 'string', enum: ['drift_exceeds_2x_threshold'] },
                 },
               } } },
@@ -665,11 +667,11 @@ app.get('/openapi.json', (c) => {
               description: 'Payment verified, credits applied',
               content: { 'application/json': { schema: {
                 type: 'object',
-                required: ['balance_usd', 'pack', 'credited'],
+                required: ['operations_remaining', 'pack'],
                 properties: {
-                  balance_usd: { type: 'number', description: 'New account balance after credit' },
+                  operations_remaining: { type: 'integer', description: 'Governance operations remaining after credit' },
                   pack: { type: 'string', enum: ['starter', 'growth', 'studio'] },
-                  credited: { type: 'number', description: 'USD amount credited from the pack' },
+                  credited_ops: { type: 'integer', description: 'Governance operations granted by this pack' },
                 },
               } } },
             },
@@ -945,7 +947,7 @@ app.get('/', (c) => {
     <header class="hero">
       <div class="hero-text">
         <h1>Gvnr</h1>
-        <p class="tagline">Substrate for x402-paying AI agents — pre-call caps, rate coordination, human override.</p>
+        <p class="tagline">Spend caps, rate coordination, and a human-in-the-loop gate for AI agents — enforced before the call, not after the invoice.</p>
         <p class="value-prop">One MCP endpoint, one credit pool, settled via x402 (USDC on Base). Compose <code style="font-family:monospace;color:#c4b5fd">budget_clear → rate_check → idempotency_check → call LLM → reconcile</code> before every provider request, or fall back to <code style="font-family:monospace;color:#c4b5fd">request_approval</code> when an agent needs a human.</p>
         <div class="header-row">
           <div class="status">
@@ -960,13 +962,17 @@ app.get('/', (c) => {
           <div class="ht-dot"></div><div class="ht-dot"></div><div class="ht-dot"></div>
           <div class="ht-host">agent@research-loop</div>
         </div>
-        <div class="ht-line"><span class="ht-prompt">$</span><span class="ht-cmd">budget_clear</span> <span class="ht-arg">model=opus-4-7 tokens=2000</span></div>
-        <div class="ht-line"><span class="ht-ok">✓ approved</span> <span class="ht-arg">·</span> <span class="ht-amt">−$0.150</span> <span class="ht-arg">· bal $4.85</span></div>
-        <div class="ht-line gap"><span class="ht-prompt">$</span><span class="ht-cmd">rate_check</span> <span class="ht-arg">provider=anthropic model=opus-4-7</span></div>
+        <div class="ht-line"><span class="ht-prompt">$</span><span class="ht-cmd">budget_clear</span> <span class="ht-arg">model=opus-4-8 tokens=2000</span></div>
+        <div class="ht-line"><span class="ht-ok">✓ approved</span></div>
+        <div class="ht-line" style="padding-left:1.4em"><span class="ht-amt">9,999 ops remaining</span></div>
+        <div class="ht-line" style="padding-left:1.4em"><span class="ht-arg">spend envelope: $4.95 left</span></div>
+        <div class="ht-line gap"><span class="ht-prompt">$</span><span class="ht-cmd">rate_check</span> <span class="ht-arg">provider=anthropic model=opus-4-8</span></div>
         <div class="ht-line"><span class="ht-ok">✓ allowed</span> <span class="ht-arg">· 4/30 RPM</span></div>
-        <div class="ht-line gap"><span class="ht-prompt">$</span><span class="ht-comment"># → your LLM call</span></div>
+        <div class="ht-line gap"><span class="ht-prompt">$</span><span class="ht-comment"># → your LLM call (you pay your provider)</span></div>
         <div class="ht-line gap"><span class="ht-prompt">$</span><span class="ht-cmd">reconcile</span> <span class="ht-arg">actual_in=1800 actual_out=2400</span></div>
-        <div class="ht-line"><span class="ht-ok">✓ drift</span> <span class="ht-arg">·</span> <span class="ht-amt">+$0.012</span> <span class="ht-arg">refunded · bal $4.86</span></div>
+        <div class="ht-line"><span class="ht-ok">✓ trued up</span></div>
+        <div class="ht-line" style="padding-left:1.4em"><span class="ht-amt">9,999 ops remaining</span></div>
+        <div class="ht-line" style="padding-left:1.4em"><span class="ht-arg">spend envelope: $4.93 left</span></div>
       </div>
     </header>
 
@@ -998,24 +1004,24 @@ app.get('/', (c) => {
         <a class="pack" href="/pay/starter" data-base="/pay/starter">
           <div class="pack-name">starter</div>
           <div class="pack-price">$19</div>
-          <div class="pack-detail">~10k tool calls / month</div>
+          <div class="pack-detail">10k governance ops / month</div>
         </a>
         <a class="pack" href="/pay/growth" data-base="/pay/growth">
           <div class="pack-name">growth</div>
           <div class="pack-price">$39</div>
-          <div class="pack-detail">~30k tool calls / month</div>
+          <div class="pack-detail">30k governance ops / month</div>
         </a>
         <a class="pack" href="/pay/studio" data-base="/pay/studio">
           <div class="pack-name">studio</div>
           <div class="pack-price">$79</div>
-          <div class="pack-detail">~100k tool calls / month</div>
+          <div class="pack-detail">100k governance ops / month</div>
         </a>
       </div>
       <div class="key-row">
         <input class="key-input" id="api-key-input" type="text" placeholder="Paste your API key (bg_...)" autocomplete="off" spellcheck="false">
         <button class="btn-get-key" id="get-key-btn" onclick="getApiKey()">Get API key</button>
       </div>
-      <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay via x402 — USDC on Base mainnet. Works with Base MCP, AgentKit, and any x402 client. Credits added immediately after on-chain verification.</p>
+      <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay via x402 — USDC on Base mainnet. Works with Base MCP, AgentKit, and any x402 client. A pack buys governance operations (budget_clear, rate_check, idempotency_check…) — your LLM tokens are billed by your provider, not by gvnr. Credits added immediately after on-chain verification.</p>
     </section>
 
     <section id="tools">
@@ -1033,7 +1039,7 @@ app.get('/', (c) => {
         </div>
         <div class="tool">
           <div class="tool-name">get_balance()</div>
-          <div class="tool-desc">Return the current account credit balance in USD.</div>
+          <div class="tool-desc">Return the remaining governance-operation quota (one budget_clear = one op).</div>
         </div>
       </div>
 
@@ -1209,21 +1215,8 @@ curl https://gvnr.dev/v1/approval/check/APPROVAL_ID \\
 
     <section id="pricing">
       <h2>Model pricing</h2>
-      <pre>claude-opus-4-7      $15.00 / $75.00  per M tokens (in / out)
-claude-opus-4-6      $15.00 / $75.00
-claude-sonnet-4-6     $3.00 / $15.00
-claude-haiku-4-5      $0.80 /  $4.00
-gpt-4o                $2.50 / $10.00
-gpt-4o-mini           $0.15 /  $0.60
-gpt-4-turbo          $10.00 / $30.00
-gemini-1-5-pro        $1.25 /  $3.50
-gemini-1-5-flash     $0.075 /  $0.30
-
-text-embedding-3-small  $0.02 / M   (input-only)
-text-embedding-3-large  $0.13 / M   (input-only)
-gemini-embedding-001    $0.15 / M   (input-only)
-gemini-embedding-2      $0.20 / M   (input-only)</pre>
-      <p style="font-size:0.8rem;color:#888;margin-top:10px">budget_clear deducts estimated cost (output tokens for chat models, input tokens for embedding/input-only models); reconcile applies the drift using both rates. Unlisted models default to $75.00/M output tokens (Opus rate — fail-safe). Updated May 2026.</p>
+      <pre>${renderPriceTable()}</pre>
+      <p style="font-size:0.8rem;color:#888;margin-top:10px">These are <strong>provider</strong> list rates — they set your per-agent spend <strong>cap</strong> (the envelope), not gvnr's charge. gvnr bills a flat governance fee per operation (see the packs above); your LLM tokens are billed by your provider directly. budget_clear estimates the cap debit (output tokens for chat models, input tokens for embedding/input-only models); reconcile trues it to actual. Unlisted models fall back to the highest rate (fail-safe). Updated May 2026.</p>
     </section>
 
     <footer>
@@ -1231,6 +1224,8 @@ gemini-embedding-2      $0.20 / M   (input-only)</pre>
         <span>USDC receiver: <span class="footer-mono">${c.env.PAYTO_ADDRESS}</span></span>
         <span>·</span>
         <span>Network: Base mainnet (eip155:8453)</span>
+        <span>·</span>
+        <span>Open source (MIT) · 100/100 tests passing</span>
         <span>·</span>
         <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
         <span>·</span>
@@ -1342,7 +1337,7 @@ app.post('/v1/admin/seed', async (c) => {
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(account.account_id));
   const result = await stub.credit(body.amount_usd);
 
-  return c.json({ ok: true, api_key: body.api_key, credited: body.amount_usd, balance_usd: result.balance_usd });
+  return c.json({ ok: true, api_key: body.api_key, credited_ops: Math.floor(body.amount_usd), operations_remaining: result.operations_remaining });
 });
 
 // Human payment routes — mounted before x402 middleware to avoid interception.

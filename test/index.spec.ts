@@ -65,7 +65,7 @@ describe('GET /', () => {
     const text = await res.text();
     expect(text).toContain('Gvnr');
     expect(text).toContain('budget_clear');
-    expect(text).toContain('x402-paying');
+    expect(text).toContain('not after the invoice');
     expect(text).toContain('x402 ·');
   });
 });
@@ -117,7 +117,7 @@ describe('GET /v1/account/balance', () => {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ balance_usd: 0 });
+    expect(await res.json()).toEqual({ operations_remaining: 0 });
   });
 });
 
@@ -299,9 +299,9 @@ describe('POST /v1/budget/clear', () => {
     expect(body.reason).toBe('no_credits');
   });
 
-  it('deducts balance on approval', async () => {
+  it('decrements the operation quota on approval', async () => {
     const { apiKey } = await provisionAccount();
-    await seedCredits(apiKey, 10);
+    await seedCredits(apiKey, 10); // 10 governance ops
     await SELF.fetch('http://localhost/v1/budget/envelope', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -315,8 +315,8 @@ describe('POST /v1/budget/clear', () => {
     const balRes = await SELF.fetch('http://localhost/v1/account/balance', {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    const { balance_usd } = await balRes.json<{ balance_usd: number }>();
-    expect(balance_usd).toBeLessThan(10);
+    const { operations_remaining } = await balRes.json<{ operations_remaining: number }>();
+    expect(operations_remaining).toBe(9); // 10 seeded − 1 clear
   });
 
   it('denies with envelope_exceeded when cost exceeds remaining', async () => {
@@ -372,11 +372,11 @@ describe('POST /v1/budget/reconcile', () => {
       body: JSON.stringify({ agent_id: 'test-agent', actual_input_tokens: 500, actual_output_tokens: 1500 }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json<{ ok: boolean; drift_usd: number; remaining_usd: number; balance_usd: number; warning?: string }>();
+    const body = await res.json<{ ok: boolean; drift_usd: number; remaining_usd: number; operations_remaining: number; warning?: string }>();
     expect(body.ok).toBe(true);
     expect(body.drift_usd).toBeCloseTo(0.009, 6);
     expect(body.warning).toBeUndefined();
-    expect(body.balance_usd).toBeCloseTo(9.976, 6);
+    expect(body.operations_remaining).toBe(9); // reconcile doesn't change the quota (10 seeded − 1 clear)
   });
 
   it('actual < estimate: negative drift refunds', async () => {
@@ -388,9 +388,9 @@ describe('POST /v1/budget/reconcile', () => {
       body: JSON.stringify({ agent_id: 'test-agent', actual_input_tokens: 100, actual_output_tokens: 200 }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json<{ drift_usd: number; balance_usd: number }>();
+    const body = await res.json<{ drift_usd: number; operations_remaining: number }>();
     expect(body.drift_usd).toBeCloseTo(-0.0717, 6);
-    expect(body.balance_usd).toBeCloseTo(9.9967, 6);
+    expect(body.operations_remaining).toBe(9); // quota unchanged by reconcile
   });
 
   it('actual == estimate: drift = 0', async () => {
@@ -552,11 +552,11 @@ describe('input-only embedding models', () => {
       body: JSON.stringify({ agent_id: 'embed-agent', actual_input_tokens: 500_000, actual_output_tokens: 0 }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json<{ ok: boolean; drift_usd: number; balance_usd: number }>();
+    const body = await res.json<{ ok: boolean; drift_usd: number; operations_remaining: number }>();
     expect(body.ok).toBe(true);
     expect(body.drift_usd).toBeCloseTo(0, 6);
-    // Balance: $1.00 - $0.01 (estimated, deducted at clear) - $0 (drift) = $0.99
-    expect(body.balance_usd).toBeCloseTo(0.99, 6);
+    // Quota: 1 seeded op − 1 clear = 0; reconcile leaves it unchanged.
+    expect(body.operations_remaining).toBe(0);
   });
 
   it('mixed envelope: chat clear + embedding clear share the same envelope', async () => {
@@ -1211,10 +1211,10 @@ describe('Slot 5 brand surface', () => {
     expect(names).toContain('check_approval');
   });
 
-  it('homepage tagline mentions human override', async () => {
+  it('homepage tagline mentions the human-in-the-loop gate', async () => {
     const res = await SELF.fetch('http://localhost/');
     const html = await res.text();
-    expect(html).toContain('human override');
+    expect(html).toContain('human-in-the-loop');
     expect(html).toContain('request_approval');
   });
 });
@@ -1323,10 +1323,10 @@ describe('POST /v1/account/topup-verify/:pack', () => {
       body: JSON.stringify({ tx_hash: VALID_TX }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json<{ balance_usd: number; pack: string; already_credited: boolean }>();
+    const body = await res.json<{ operations_remaining: number; pack: string; already_credited: boolean }>();
     expect(body.already_credited).toBe(true);
     expect(body.pack).toBe('starter');
-    expect(typeof body.balance_usd).toBe('number');
+    expect(typeof body.operations_remaining).toBe('number');
   });
 
   it('returns 400 when tx not found on chain', async () => {
@@ -1352,9 +1352,9 @@ describe('POST /v1/account/topup-verify/:pack', () => {
       body: JSON.stringify({ tx_hash: TX }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json<{ balance_usd: number; credited: number }>();
-    expect(body.credited).toBe(19);
-    expect(body.balance_usd).toBe(19);
+    const body = await res.json<{ operations_remaining: number; credited_ops: number }>();
+    expect(body.credited_ops).toBe(10_000);
+    expect(body.operations_remaining).toBe(10_000);
 
     // tx marked as used in KV
     const used = await env.BUDGET_KV.get(`used_tx:84532:${TX}`);
@@ -1364,7 +1364,7 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     const balRes = await SELF.fetch('http://localhost/v1/account/balance', {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    expect((await balRes.json<{ balance_usd: number }>()).balance_usd).toBe(19);
+    expect((await balRes.json<{ operations_remaining: number }>()).operations_remaining).toBe(10_000);
   });
 
   it('second submit of same tx hash returns existing balance, does not double-credit', async () => {
@@ -1383,9 +1383,9 @@ describe('POST /v1/account/topup-verify/:pack', () => {
       body: JSON.stringify({ tx_hash: TX }),
     });
     expect(second.status).toBe(200);
-    const body = await second.json<{ balance_usd: number; already_credited: boolean }>();
+    const body = await second.json<{ operations_remaining: number; already_credited: boolean }>();
     expect(body.already_credited).toBe(true);
-    expect(body.balance_usd).toBe(19); // unchanged — no double credit
+    expect(body.operations_remaining).toBe(10_000); // unchanged — no double credit
   });
 
   it('rejects transfer to wrong address', async () => {
@@ -1442,9 +1442,9 @@ describe('POST /v1/account/topup-verify/:pack', () => {
       body: JSON.stringify({ tx_hash: TX }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json<{ balance_usd: number; credited: number }>();
-    expect(body.credited).toBe(19);
-    expect(body.balance_usd).toBe(19);
+    const body = await res.json<{ operations_remaining: number; credited_ops: number }>();
+    expect(body.credited_ops).toBe(10_000);
+    expect(body.operations_remaining).toBe(10_000);
 
     const logged = logSpy.mock.calls.map(c => String(c[0])).find(s => s.includes('overpayment'));
     expect(logged).toBeTruthy();
@@ -1484,7 +1484,7 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     });
 
     expect(res.status).toBe(200);
-    expect((await res.json<{ balance_usd: number }>()).balance_usd).toBe(19);
+    expect((await res.json<{ operations_remaining: number }>()).operations_remaining).toBe(10_000);
     expect(calls).toEqual(['primary', 'fallback']);
   });
 });
@@ -1526,12 +1526,12 @@ describe('MCP tools → Durable Object routing', () => {
     expect(clearance.approved).toBe(true);
   });
 
-  it('get_balance via MCP returns DO balance after credit', async () => {
+  it('get_balance via MCP returns the operation quota after credit', async () => {
     const { apiKey } = await provisionAccount();
-    await seedCredits(apiKey, 7);
+    await seedCredits(apiKey, 7); // 7 governance ops
 
     const bal = await mcpToolCall(apiKey, 'get_balance', {});
-    expect(bal.balance_usd).toBe(7);
+    expect(bal.operations_remaining).toBe(7);
   });
 
   it('returns 401 for missing api_key', async () => {
@@ -1600,17 +1600,17 @@ describe('cross-path: MCP write → REST read', () => {
 // ── runClearance edge cases ───────────────────────────────────────────────────
 
 describe('estimateCostUsd unknown-model fallback', () => {
-  it('debits unknown models at the highest known rate (Opus output) — fail-safe', async () => {
+  it('prices unknown models at the highest fail-safe rate against the spend cap', async () => {
     const { apiKey } = await provisionAccount();
-    // $0.075 = 1000 tokens × $75/M (Opus rate, the new default)
-    await seedCredits(apiKey, 0.075);
+    await seedCredits(apiKey, 10); // ample op quota — the cap is the limiter here
+    // Unknown models fall back to DEFAULT_PRICE ($75/M output): 1000 tokens = $0.075,
+    // so a $0.075 cap admits exactly one call.
     await SELF.fetch('http://localhost/v1/budget/envelope', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: 'agent', limit_usd: 1 }),
+      body: JSON.stringify({ agent_id: 'agent', limit_usd: 0.075 }),
     });
 
-    // Approves at exactly the seeded balance
     const ok = await SELF.fetch('http://localhost/v1/budget/clear', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -1618,7 +1618,7 @@ describe('estimateCostUsd unknown-model fallback', () => {
     });
     expect((await ok.json<{ approved: boolean }>()).approved).toBe(true);
 
-    // Now denied — balance drained at the higher (Opus) rate, not the old $15 default
+    // Cap drained at the $75/M fail-safe rate → the next (tiny) call exceeds it.
     const denied = await SELF.fetch('http://localhost/v1/budget/clear', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -1626,22 +1626,22 @@ describe('estimateCostUsd unknown-model fallback', () => {
     });
     const body = await denied.json<{ approved: boolean; reason: string }>();
     expect(body.approved).toBe(false);
-    expect(body.reason).toBe('no_credits');
+    expect(body.reason).toBe('envelope_exceeded');
   });
 });
 
 describe('runClearance edge cases', () => {
-  // haiku-4-5 = $4/M tokens → 1000 tokens = $0.004
+  // haiku-4-5 = $5/M output → 1000 tokens = $0.005 (feeds the spend cap, not the quota)
   const MODEL = 'claude-haiku-4-5-20251001';
-  const COST = 0.004; // cost of 1000 tokens at haiku price
+  const COST = 0.005; // cap cost of 1000 tokens at haiku price
 
-  it('approves when balance equals estimated cost exactly', async () => {
+  it('approves while at least one operation remains', async () => {
     const { apiKey } = await provisionAccount();
-    await seedCredits(apiKey, COST);
+    await seedCredits(apiKey, 1); // exactly one governance op
     await SELF.fetch('http://localhost/v1/budget/envelope', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: 'agent', limit_usd: COST }),
+      body: JSON.stringify({ agent_id: 'agent', limit_usd: 1 }),
     });
 
     const res = await SELF.fetch('http://localhost/v1/budget/clear', {
@@ -1652,13 +1652,13 @@ describe('runClearance edge cases', () => {
     expect((await res.json<{ approved: boolean }>()).approved).toBe(true);
   });
 
-  it('depletes balance across sequential clearances, then denies', async () => {
+  it('depletes the operation quota across sequential clearances, then denies', async () => {
     const { apiKey } = await provisionAccount();
-    await seedCredits(apiKey, COST * 3); // exactly 3 clearances
+    await seedCredits(apiKey, 3); // exactly 3 ops
     await SELF.fetch('http://localhost/v1/budget/envelope', {
       method: 'PUT',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: 'agent', limit_usd: COST * 10 }),
+      body: JSON.stringify({ agent_id: 'agent', limit_usd: 10 }), // cap not the limiter
     });
 
     const args = { agent_id: 'agent', model: MODEL, estimated_tokens: 1000 };

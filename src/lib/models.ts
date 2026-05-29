@@ -8,16 +8,19 @@
 // "claude-haiku-4-5-20251001" resolve to "claude-haiku-4-5".
 type PriceEntry = { in: number; out: number; input_only?: boolean };
 
-const MODEL_PRICES: Record<string, PriceEntry> = {
-  'claude-opus-4-7':       { in: 15,    out: 75 },
-  'claude-opus-4-6':       { in: 15,    out: 75 },
+// Provider rates only feed the per-agent spend cap (the envelope), NOT gvnr's revenue —
+// revenue is a flat per-operation quota (see PACKS / operations_remaining). So these
+// numbers must track each provider's real list price for accurate caps. Verified against
+// platform.claude.com / OpenAI / Google pricing, May 2026.
+export const MODEL_PRICES: Record<string, PriceEntry> = {
+  'claude-opus-4-8':       { in: 5,     out: 25 },
+  'claude-opus-4-7':       { in: 5,     out: 25 },
+  'claude-opus-4-6':       { in: 5,     out: 25 },
   'claude-sonnet-4-6':     { in: 3,     out: 15 },
-  'claude-haiku-4-5':      { in: 0.8,   out: 4 },
+  'claude-haiku-4-5':      { in: 1,     out: 5 },
   'gpt-4o-mini':           { in: 0.15,  out: 0.6 },
   'gpt-4o':                { in: 2.5,   out: 10 },
   'gpt-4-turbo':           { in: 10,    out: 30 },
-  'gemini-1-5-pro':        { in: 1.25,  out: 3.5 },
-  'gemini-1-5-flash':      { in: 0.075, out: 0.3 },
   'text-embedding-3-small': { in: 0.02, out: 0, input_only: true },
   'text-embedding-3-large': { in: 0.13, out: 0, input_only: true },
   'gemini-embedding-001':  { in: 0.15,  out: 0, input_only: true },
@@ -27,8 +30,8 @@ const MODEL_PRICES: Record<string, PriceEntry> = {
 // Sorted once at module load — longest prefix wins (e.g. "gpt-4o-mini" before "gpt-4o").
 const MODEL_PRICE_ENTRIES = Object.entries(MODEL_PRICES).sort((a, b) => b[0].length - a[0].length);
 
-// Fail-safe direction: unknown model strings price at the highest known rates (Opus)
-// so a typo or new model can never silently under-bill the agent's envelope.
+// Fail-safe direction: unknown model strings price above every listed rate so a typo or
+// a brand-new model can never silently under-bill the agent's envelope (cap only).
 const DEFAULT_PRICE: PriceEntry = { in: 15, out: 75 };
 
 function modelPrice(model: string): PriceEntry {
@@ -55,6 +58,20 @@ export function actualCostUsd(model: string, input_tokens: number, output_tokens
 
 export function roundUsd(usd: number): number {
   return Math.round(usd * 1e6) / 1e6;
+}
+
+// Renders the public "Model pricing" block straight from MODEL_PRICES so the homepage
+// table can never drift from the rates the cap actually uses (they did, once — Opus was
+// 3× stale). Insertion order in MODEL_PRICES is the display order.
+export function renderPriceTable(): string {
+  const rows = Object.entries(MODEL_PRICES);
+  const nameW = Math.max(...rows.map(([k]) => k.length)) + 2;
+  const usd = (n: number) => `$${n.toFixed(2)}`;
+  const chat = rows.filter(([, p]) => !p.input_only)
+    .map(([k, p], i) => `${k.padEnd(nameW)}${usd(p.in).padStart(7)} / ${usd(p.out).padStart(7)}${i === 0 ? '  per M tokens (in / out)' : ''}`);
+  const embed = rows.filter(([, p]) => p.input_only)
+    .map(([k, p]) => `${k.padEnd(nameW)}${usd(p.in).padStart(7)} / M   (input-only)`);
+  return [...chat, '', ...embed].join('\n');
 }
 
 export function nextDailyReset(): number {

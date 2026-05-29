@@ -91,10 +91,10 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
   server.registerTool(
     'get_balance',
     {
-      description: 'Read-only snapshot of the account-level credit balance in USD. Balance is increased by topups and decreased by `budget_clear` (estimated cost at clearance time) and `reconcile` (drift correction). Per-agent spend caps are separate — see `set_envelope`. Returns {balance_usd:number}.',
+      description: 'Read-only snapshot of the account-level governance-operation quota. The quota is increased by topups (each pack grants a fixed number of operations) and decreased by one per `budget_clear`. Your LLM token spend is billed by your provider, not here; per-agent spend caps are separate — see `set_envelope`. Returns {operations_remaining:number}.',
       inputSchema: {},
       annotations: {
-        title: 'Get account credit balance',
+        title: 'Get governance-operation quota',
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,
@@ -102,15 +102,15 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
       },
     },
     async () => {
-      const balance = await stub.getBalance();
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ balance_usd: balance }) }] };
+      const operations = await stub.getOperations();
+      return { content: [{ type: 'text' as const, text: JSON.stringify({ operations_remaining: operations }) }] };
     },
   );
 
   server.registerTool(
     'reconcile',
     {
-      description: 'Post-call drift correction. After the LLM returns, call this with the actual input/output token counts from the provider response — applies the delta (actual minus estimated cost) to the agent envelope and account balance. Pairs with `budget_clear`: clear runs the estimate, reconcile runs the correction. If reconcile is skipped, the estimated cost stands. Not idempotent — calling twice double-corrects; gate with `idempotency_check` if your retry policy requires it.',
+      description: 'Post-call drift correction. After the LLM returns, call this with the actual input/output token counts from the provider response — applies the delta (actual minus estimated cost) to the agent envelope (the spend cap); the operation quota is unchanged. Pairs with `budget_clear`: clear runs the estimate, reconcile runs the correction. If reconcile is skipped, the estimated cost stands. Not idempotent — calling twice double-corrects; gate with `idempotency_check` if your retry policy requires it.',
       inputSchema: {
         agent_id: z.string().max(128).describe('The agent identifier'),
         actual_input_tokens: z.number().int().finite().nonnegative().describe('Actual input tokens reported by the LLM provider'),

@@ -52,8 +52,8 @@ pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
 
   const alreadyUsed = await c.env.BUDGET_KV.get(txKey);
   if (alreadyUsed) {
-    const balance = await stub.getBalance();
-    return c.json({ balance_usd: balance, pack: packName, already_credited: true });
+    const operations = await stub.getOperations();
+    return c.json({ operations_remaining: operations, pack: packName, already_credited: true });
   }
 
   const expectedRaw = packToRawAmount(pack.amount_usd);
@@ -78,12 +78,12 @@ pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
     }));
   }
 
-  const credited = await stub.credit(pack.amount_usd);
+  const credited = await stub.credit(pack.ops);
 
   // Mark tx as used — 30-day TTL prevents replay, doesn't bloat KV forever
   await c.env.BUDGET_KV.put(txKey, '1', { expirationTtl: 2592000 });
 
-  return c.json({ balance_usd: credited.balance_usd, pack: packName, credited: pack.amount_usd });
+  return c.json({ operations_remaining: credited.operations_remaining, pack: packName, credited_ops: pack.ops });
 });
 
 // GET /pay/:pack — human-facing payment page
@@ -264,7 +264,8 @@ function payPage(d: PageData): string {
       <ul>
         <li>Network: <strong style="color:#ccc">Base</strong> (not Ethereum mainnet)</li>
         <li>Token: <strong style="color:#ccc">USDC</strong> — send exactly $${d.amountUsd}</li>
-        <li>Contract: <span style="font-family:monospace;font-size:0.78rem;color:#888">${d.usdcContract}</span></li>
+        <li>Contract: <a href="${isTestnet ? 'https://sepolia.basescan.org' : 'https://basescan.org'}/token/${d.usdcContract}" target="_blank" rel="noopener" style="font-family:monospace;font-size:0.78rem;color:#818cf8">${d.usdcContract} ↗</a></li>
+        <li>Receiver: <a href="${isTestnet ? 'https://sepolia.basescan.org' : 'https://basescan.org'}/address/${d.paytoAddress}" target="_blank" rel="noopener" style="color:#818cf8">verify on Basescan ↗</a></li>
       </ul>
     </div>
   </div>
@@ -367,7 +368,7 @@ function showVerifyResult(result) {
   if (result.localError === 'bad_hash') return showStatus('Enter a valid transaction hash (0x + 64 hex chars).', 'err');
   if (result.localError === 'network') return showStatus('Network error. Try again.', 'err');
   if (result.ok) {
-    showStatus('Credited! New balance: $' + result.data.balance_usd.toFixed(2) + ' USD', 'ok');
+    showStatus('Credited! ' + result.data.operations_remaining.toLocaleString() + ' governance ops available', 'ok');
     document.getElementById('mcp-cmd').textContent =
       'claude mcp add budget-governor --transport http \\\n  "https://gvnr.dev/mcp?api_key=' + apiKey + '"';
     document.getElementById('next-steps').style.display = 'block';
