@@ -52,11 +52,10 @@ async function fetchReceipt(rpcUrl: string, txHash: string): Promise<RpcReceipt 
 export async function verifyUsdcTransfer(
   txHash: string,
   payTo: string,
-  expectedRawAmount: bigint,
   usdcContract: string,
   rpcUrl: string,
   fallbackRpcUrl?: string,
-): Promise<{ ok: boolean; error?: string; overpaid_raw?: string }> {
+): Promise<{ ok: boolean; error?: string; amount_raw?: string }> {
   let receipt: RpcReceipt | null;
   try {
     receipt = await fetchReceipt(rpcUrl, txHash);
@@ -75,17 +74,18 @@ export async function verifyUsdcTransfer(
   const paddedPayTo = padAddress(payTo);
   const usdcLower = usdcContract.toLowerCase();
 
+  // Sum every USDC transfer to payTo in this tx and credit whatever actually arrived
+  // (pay-as-you-go). No expected-amount gate: the old `>= expected` check rejected
+  // under-payments while the user's USDC had already moved to payTo — i.e. it ate their
+  // funds. Proportional crediting downstream removes that footgun.
+  let total = 0n;
   for (const log of receipt.logs) {
     if (log.address.toLowerCase() !== usdcLower) continue;
     if (log.topics[0]?.toLowerCase() !== TRANSFER_TOPIC) continue;
     if (log.topics[2]?.toLowerCase() !== paddedPayTo) continue;
-
-    const transferAmount = BigInt(log.data);
-    if (transferAmount >= expectedRawAmount) {
-      const overpay = transferAmount - expectedRawAmount;
-      return { ok: true, overpaid_raw: overpay > 0n ? overpay.toString() : undefined };
-    }
+    total += BigInt(log.data);
   }
 
+  if (total > 0n) return { ok: true, amount_raw: total.toString() };
   return { ok: false, error: 'transfer_not_found' };
 }

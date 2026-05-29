@@ -7,13 +7,15 @@ import type { MiddlewareHandler } from 'hono';
 
 const FALLBACK_FACILITATOR_URL = 'https://x402.org/facilitator';
 
-// `ops` = governance operations granted (one per budget_clear). This is gvnr's revenue
-// unit — flat per-op quota, decoupled from the customer's LLM spend (which they pay their
-// provider directly). Bigger packs price each op lower: $0.0019 / $0.0013 / $0.00079.
+// Packs are PRESET top-up amounts, not rigid SKUs. Ops are derived from the pay-as-you-go
+// rate (OPS_PER_USD in models.ts): a top-up credits floor(amount_usd * OPS_PER_USD) ops, so
+// any amount works and packs are just convenient presets. At 1,000 ops/$1 these yield
+// 19,000 / 39,000 / 79,000 ops. gvnr's revenue is the op quota, decoupled from the
+// customer's LLM spend (which they pay their provider directly).
 export const PACKS = {
-  starter: { amount_usd: 19, ops: 10_000,  description: 'Starter — 10k governance ops/month' },
-  growth:  { amount_usd: 39, ops: 30_000,  description: 'Growth — 30k governance ops/month' },
-  studio:  { amount_usd: 79, ops: 100_000, description: 'Studio — 100k governance ops/month' },
+  starter: { amount_usd: 19, description: 'Starter — 19,000 governance ops' },
+  growth:  { amount_usd: 39, description: 'Growth — 39,000 governance ops' },
+  studio:  { amount_usd: 79, description: 'Studio — 79,000 governance ops' },
 } as const;
 
 export type PackName = keyof typeof PACKS;

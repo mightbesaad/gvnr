@@ -74,6 +74,16 @@ export function renderPriceTable(): string {
   return [...chat, '', ...embed].join('\n');
 }
 
+// Pay-as-you-go rate. gvnr's revenue is a flat governance-operation quota, decoupled from
+// the customer's LLM spend. 1,000 ops per $1 (approved 2026-05-29). Per-op cost-to-serve is
+// ~$0.000003, so this is ~99.7% margin with deliberate headroom to raise later. A top-up of
+// any USD amount credits floor(amount * OPS_PER_USD) ops — packs are just preset amounts.
+export const OPS_PER_USD = 1000;
+
+export function opsForUsd(amountUsd: number): number {
+  return Math.floor(amountUsd * OPS_PER_USD);
+}
+
 export function nextDailyReset(): number {
   const now = new Date();
   const tomorrow = new Date(now);

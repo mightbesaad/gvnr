@@ -3,6 +3,7 @@ import type { AccountConfigRecord, Env } from '../lib/types';
 import { hashApiKey } from '../lib/kv';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
 import { PACKS, type PackName } from '../lib/x402';
+import { opsForUsd } from '../lib/models';
 
 type Variables = AuthVariables;
 
@@ -97,9 +98,10 @@ account.post('/topup/:pack', authMiddleware, async (c) => {
 
   const accountId = c.get('accountId');
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
-  const result = await stub.credit(pack.ops);
+  const ops = opsForUsd(pack.amount_usd);
+  const result = await stub.credit(ops);
 
-  return c.json({ operations_remaining: result.operations_remaining, pack: packName, credited_ops: pack.ops });
+  return c.json({ operations_remaining: result.operations_remaining, pack: packName, credited_ops: ops });
 });
 
 export default account;

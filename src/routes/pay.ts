@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import type { Env } from '../lib/types';
 import { PACKS, type PackName } from '../lib/x402';
-import { NETWORK_CONFIGS, type NetworkKey, packToRawAmount, verifyUsdcTransfer } from '../lib/chain';
+import { NETWORK_CONFIGS, type NetworkKey, packToRawAmount, verifyUsdcTransfer, USDC_DECIMALS } from '../lib/chain';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
+import { opsForUsd } from '../lib/models';
 
 type Variables = AuthVariables;
 
@@ -56,34 +57,28 @@ pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
     return c.json({ operations_remaining: operations, pack: packName, already_credited: true });
   }
 
-  const expectedRaw = packToRawAmount(pack.amount_usd);
   const verification = await verifyUsdcTransfer(
     txHash,
     c.env.PAYTO_ADDRESS,
-    expectedRaw,
     cfg.usdcContract,
     cfg.rpcUrl,
     c.env.BASE_RPC_FALLBACK_URL,
   );
-  if (!verification.ok) return c.json({ error: verification.error }, 400);
-
-  if (verification.overpaid_raw) {
-    console.log(JSON.stringify({
-      event: 'overpayment',
-      tx_hash: txHash,
-      account_id: accountId,
-      pack: packName,
-      expected_raw: expectedRaw.toString(),
-      overpaid_raw: verification.overpaid_raw,
-    }));
+  if (!verification.ok) {
+    const transient = verification.error === 'tx_not_found' || verification.error === 'rpc_error';
+    return c.json({ error: verification.error, retryable: transient }, 400);
   }
 
-  const credited = await stub.credit(pack.ops);
+  // Pay-as-you-go: credit ops proportional to however much USDC actually arrived at payTo.
+  // Any amount works; nothing is rejected or wasted (no fund-loss footgun).
+  const creditedUsd = Number(BigInt(verification.amount_raw!)) / 10 ** USDC_DECIMALS;
+  const ops = opsForUsd(creditedUsd);
+  const credited = await stub.credit(ops);
 
   // Mark tx as used — 30-day TTL prevents replay, doesn't bloat KV forever
   await c.env.BUDGET_KV.put(txKey, '1', { expirationTtl: 2592000 });
 
-  return c.json({ operations_remaining: credited.operations_remaining, pack: packName, credited_ops: pack.ops });
+  return c.json({ operations_remaining: credited.operations_remaining, credited_ops: ops, credited_usd: creditedUsd });
 });
 
 // GET /pay/:pack — human-facing payment page

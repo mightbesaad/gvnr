@@ -1193,23 +1193,23 @@ describe('Agent Approval Bridge', () => {
 // ── Brand surface: MCP card and homepage reflect Slot 5 rename ───────────────
 
 describe('Slot 5 brand surface', () => {
-  it('mcp.json card name is "Gvnr" and version 1.5.4', async () => {
+  it('mcp.json card name is "Gvnr" and version 1.6.0', async () => {
     const res = await SELF.fetch('http://localhost/.well-known/mcp.json');
     expect(res.status).toBe(200);
     const body = await res.json<{ name: string; version: string; tools: { name: string }[] }>();
     expect(body.name).toBe('Gvnr');
-    expect(body.version).toBe('1.5.4');
+    expect(body.version).toBe('1.6.0');
     const toolNames = body.tools.map((t) => t.name);
     expect(toolNames).toContain('request_approval');
     expect(toolNames).toContain('check_approval');
   });
 
-  it('openapi.json title is "Gvnr" and version 1.5.4', async () => {
+  it('openapi.json title is "Gvnr" and version 1.6.0', async () => {
     const res = await SELF.fetch('http://localhost/openapi.json');
     expect(res.status).toBe(200);
     const body = await res.json<{ info: { title: string; version: string }; paths: Record<string, unknown> }>();
     expect(body.info.title).toBe('Gvnr');
-    expect(body.info.version).toBe('1.5.4');
+    expect(body.info.version).toBe('1.6.0');
     expect(body.paths['/v1/approval/request']).toBeDefined();
     expect(body.paths['/v1/approval/check/{approval_id}']).toBeDefined();
   });
@@ -1364,8 +1364,8 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     });
     expect(res.status).toBe(200);
     const body = await res.json<{ operations_remaining: number; credited_ops: number }>();
-    expect(body.credited_ops).toBe(10_000);
-    expect(body.operations_remaining).toBe(10_000);
+    expect(body.credited_ops).toBe(19_000); // $19 × 1,000 ops/$ (pay-as-you-go)
+    expect(body.operations_remaining).toBe(19_000);
 
     // tx marked as used in KV
     const used = await env.BUDGET_KV.get(`used_tx:84532:${TX}`);
@@ -1375,7 +1375,7 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     const balRes = await SELF.fetch('http://localhost/v1/account/balance', {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    expect((await balRes.json<{ operations_remaining: number }>()).operations_remaining).toBe(10_000);
+    expect((await balRes.json<{ operations_remaining: number }>()).operations_remaining).toBe(19_000);
   });
 
   it('second submit of same tx hash returns existing balance, does not double-credit', async () => {
@@ -1396,7 +1396,7 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     expect(second.status).toBe(200);
     const body = await second.json<{ operations_remaining: number; already_credited: boolean }>();
     expect(body.already_credited).toBe(true);
-    expect(body.operations_remaining).toBe(10_000); // unchanged — no double credit
+    expect(body.operations_remaining).toBe(19_000); // unchanged — no double credit
   });
 
   it('rejects transfer to wrong address', async () => {
@@ -1413,38 +1413,9 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     expect((await res.json<{ error: string }>()).error).toBe('transfer_not_found');
   });
 
-  it('rejects wrong USDC amount', async () => {
+  it('PAYG: credits proportionally when less than the preset is sent (no rejection, no lost funds)', async () => {
     const TX = '0x' + 'f'.repeat(64);
-    stubRpc(makeReceipt(PAYTO, 1_000_000n)); // $1 instead of $19
-    const { apiKey } = await provisionAccount();
-
-    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_hash: TX }),
-    });
-    expect(res.status).toBe(400);
-    expect((await res.json<{ error: string }>()).error).toBe('transfer_not_found');
-  });
-
-  it('rejects underpayment by 1 wei (proves >= not >)', async () => {
-    const TX = '0x' + '1'.repeat(64);
-    stubRpc(makeReceipt(PAYTO, 19_000_000n - 1n));
-    const { apiKey } = await provisionAccount();
-
-    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_hash: TX }),
-    });
-    expect(res.status).toBe(400);
-    expect((await res.json<{ error: string }>()).error).toBe('transfer_not_found');
-  });
-
-  it('credits pack amount and logs overpayment when transfer exceeds expected', async () => {
-    const TX = '0x' + '2'.repeat(64);
-    stubRpc(makeReceipt(PAYTO, 20_000_000n)); // $20 sent to $19 pack — $1 overpay
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    stubRpc(makeReceipt(PAYTO, 1_000_000n)); // $1 sent against the $19 "starter" preset
     const { apiKey } = await provisionAccount();
 
     const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
@@ -1453,17 +1424,40 @@ describe('POST /v1/account/topup-verify/:pack', () => {
       body: JSON.stringify({ tx_hash: TX }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json<{ operations_remaining: number; credited_ops: number }>();
-    expect(body.credited_ops).toBe(10_000);
-    expect(body.operations_remaining).toBe(10_000);
+    const body = await res.json<{ credited_ops: number; credited_usd: number }>();
+    expect(body.credited_ops).toBe(1_000); // $1 × 1,000 ops/$ — credited, not rejected
+    expect(body.credited_usd).toBe(1);
+  });
 
-    const logged = logSpy.mock.calls.map(c => String(c[0])).find(s => s.includes('overpayment'));
-    expect(logged).toBeTruthy();
-    const parsed = JSON.parse(logged!);
-    expect(parsed.event).toBe('overpayment');
-    expect(parsed.pack).toBe('starter');
-    expect(parsed.overpaid_raw).toBe('1000000');
-    logSpy.mockRestore();
+  it('PAYG: under-payment by 1 wei is still credited proportionally (footgun fix)', async () => {
+    const TX = '0x' + '1'.repeat(64);
+    stubRpc(makeReceipt(PAYTO, 19_000_000n - 1n)); // $18.999999
+    const { apiKey } = await provisionAccount();
+
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ credited_ops: number }>();
+    expect(body.credited_ops).toBe(18_999); // floor(18.999999 × 1000) — funds never lost
+  });
+
+  it('PAYG: over-payment is credited in full, no surplus wasted', async () => {
+    const TX = '0x' + '2'.repeat(64);
+    stubRpc(makeReceipt(PAYTO, 20_000_000n)); // $20 sent against the $19 "starter" preset
+    const { apiKey } = await provisionAccount();
+
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ credited_ops: number; credited_usd: number }>();
+    expect(body.credited_ops).toBe(20_000); // $20 × 1,000 — full value, nothing wasted
+    expect(body.credited_usd).toBe(20);
   });
 
   it('falls back to BASE_RPC_FALLBACK_URL when primary RPC throws', async () => {
@@ -1495,7 +1489,7 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     });
 
     expect(res.status).toBe(200);
-    expect((await res.json<{ operations_remaining: number }>()).operations_remaining).toBe(10_000);
+    expect((await res.json<{ operations_remaining: number }>()).operations_remaining).toBe(19_000);
     expect(calls).toEqual(['primary', 'fallback']);
   });
 });

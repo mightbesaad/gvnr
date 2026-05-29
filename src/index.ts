@@ -149,7 +149,7 @@ app.get('/.well-known/mcp.json', (c) => {
   return c.json({
     name: 'Gvnr',
     description: 'x402-paying AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges. One MCP endpoint, one credit pool, settled via x402 (USDC on Base).',
-    version: '1.5.4',
+    version: '1.6.0',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
     authentication: {
@@ -210,7 +210,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Gvnr', version: '1.5.4', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
+    info: { title: 'Gvnr', version: '1.6.0', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
@@ -1005,24 +1005,24 @@ app.get('/', (c) => {
         <a class="pack" href="/pay/starter" data-base="/pay/starter">
           <div class="pack-name">starter</div>
           <div class="pack-price">$19</div>
-          <div class="pack-detail">10k governance ops / month</div>
+          <div class="pack-detail">19,000 governance ops</div>
         </a>
         <a class="pack" href="/pay/growth" data-base="/pay/growth">
           <div class="pack-name">growth</div>
           <div class="pack-price">$39</div>
-          <div class="pack-detail">30k governance ops / month</div>
+          <div class="pack-detail">39,000 governance ops</div>
         </a>
         <a class="pack" href="/pay/studio" data-base="/pay/studio">
           <div class="pack-name">studio</div>
           <div class="pack-price">$79</div>
-          <div class="pack-detail">100k governance ops / month</div>
+          <div class="pack-detail">79,000 governance ops</div>
         </a>
       </div>
       <div class="key-row">
         <input class="key-input" id="api-key-input" type="text" placeholder="Paste your API key (bg_...)" autocomplete="off" spellcheck="false">
         <button class="btn-get-key" id="get-key-btn" onclick="getApiKey()">Get API key</button>
       </div>
-      <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay via x402 — USDC on Base mainnet. Works with Base MCP, AgentKit, and any x402 client. A pack buys governance operations (budget_clear, rate_check, idempotency_check…) — your LLM tokens are billed by your provider, not by gvnr. Credits added immediately after on-chain verification.</p>
+      <p style="font-size:0.78rem;color:#777;margin-top:8px">Pay-as-you-go — USDC on Base mainnet, no minimum: send any amount and ops are credited at ~1,000 per $1 (these packs are just presets). Works with Base MCP, AgentKit, and any x402 client. Ops cover governance operations (budget_clear, rate_check, idempotency_check…); your LLM tokens are billed by your provider, not by gvnr. Credited immediately after on-chain verification.</p>
     </section>
 
     <section id="tools">
