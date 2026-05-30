@@ -275,3 +275,9 @@ Runs on **Base mainnet** (`X402_NETWORK=eip155:8453`), settling real USDC. There
 MIT — see [LICENSE](LICENSE).
 
 The canonical hosted service is `https://gvnr.dev`. Self-hosted instances are unaffiliated.
+
+---
+
+## Acknowledgments
+
+gvnr was designed and built by [mightbesaad](https://github.com/mightbesaad) in close partnership with **Claude Code** (Anthropic) — chiefly **Claude Opus 4.8**. From the substrate architecture and the billing model to the code in this repository, it was a genuine collaboration. Thank you.
