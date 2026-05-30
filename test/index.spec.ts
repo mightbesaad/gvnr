@@ -1,6 +1,7 @@
 import { env, SELF } from 'cloudflare:test';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { parseTopupUsd, MIN_TOPUP_USD, MAX_TOPUP_USD, shouldCreditAfterSettle, type TopupIntent } from '../src/lib/x402';
+import { sendTelegramAlert } from '../src/lib/notify';
 
 // ── RPC mock helpers ─────────────────────────────────────────────────────────
 
@@ -293,6 +294,26 @@ describe('shouldCreditAfterSettle (settle-contingent credit rule)', () => {
   it('does NOT credit when no intent was stashed (unpaid — handler never ran)', () => {
     expect(shouldCreditAfterSettle(undefined, 200)).toBe(false);
     expect(shouldCreditAfterSettle(undefined, 402)).toBe(false);
+  });
+});
+
+describe('sendTelegramAlert (ops alerts)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('no-ops gracefully when the bot token / chat id are not configured', async () => {
+    expect(await sendTelegramAlert({}, 'hi')).toBe('skipped_no_config');
+    expect(await sendTelegramAlert({ TELEGRAM_BOT_TOKEN: 't' }, 'hi')).toBe('skipped_no_config');
+  });
+
+  it('posts to the Telegram API when configured', async () => {
+    let calledUrl = '';
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      calledUrl = typeof input === 'string' ? input : (input as URL).href;
+      return new Response('{"ok":true}', { status: 200 });
+    });
+    const status = await sendTelegramAlert({ TELEGRAM_BOT_TOKEN: 'BOT', TELEGRAM_CHAT_ID: '42' }, 'alert');
+    expect(status).toBe('sent');
+    expect(calledUrl).toContain('/botBOT/sendMessage');
   });
 });
 

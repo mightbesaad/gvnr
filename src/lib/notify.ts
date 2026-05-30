@@ -47,6 +47,28 @@ function buildEmail(approval: ApprovalRecord, approvalUrl: string): { subject: s
   return { subject, text, html };
 }
 
+export type TelegramDispatchStatus = 'sent' | 'skipped_no_config' | 'failed';
+
+// Fire a plain-text Telegram alert for ops/money-critical events (e.g. a top-up that settled
+// on-chain but failed to credit). No-ops gracefully when the bot token / chat id are not
+// configured, mirroring the approval-email pattern. Best-effort: never throws.
+export async function sendTelegramAlert(
+  env: { TELEGRAM_BOT_TOKEN?: string; TELEGRAM_CHAT_ID?: string },
+  text: string,
+): Promise<TelegramDispatchStatus> {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return 'skipped_no_config';
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text, disable_web_page_preview: true }),
+    });
+    return res.ok ? 'sent' : 'failed';
+  } catch {
+    return 'failed';
+  }
+}
+
 export async function sendApprovalEmail(
   apiKey: string | undefined,
   to: string,

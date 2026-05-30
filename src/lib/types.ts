@@ -40,4 +40,6 @@ export interface Env {
   RESEND_API_KEY?: string;   // optional — outbound approval email via Resend
   CDP_API_KEY_ID?: string;   // optional — Coinbase Developer Platform key ID for x402 mainnet facilitator
   CDP_API_KEY_SECRET?: string; // optional — paired CDP key secret
+  TELEGRAM_BOT_TOKEN?: string; // optional — ops alerts (e.g. settled-but-not-credited top-ups)
+  TELEGRAM_CHAT_ID?: string;   // optional — paired chat id for TELEGRAM_BOT_TOKEN
 }

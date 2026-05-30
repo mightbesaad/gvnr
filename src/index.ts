@@ -15,6 +15,7 @@ import tosRoutes from './routes/tos';
 import b2bRoutes from './routes/b2b';
 import { getAccount } from './lib/kv';
 import { renderPriceTable } from './lib/models';
+import { sendTelegramAlert } from './lib/notify';
 export { AccountState } from './lib/account-do';
 
 type AppVars = { Bindings: Env; Variables: { topupIntent?: TopupIntent } };
@@ -1745,6 +1746,13 @@ async function creditAfterSettle(c: Context<AppVars>): Promise<void> {
       // KV also failed — nothing more we can do durably; the console.error above is the last record.
       console.error(JSON.stringify({ event: 'topup_credit_failure_record_failed', error: String(kvErr) }));
     }
+    // Fire a best-effort ops alert without delaying the response (no-ops if Telegram is unconfigured).
+    c.executionCtx.waitUntil(sendTelegramAlert(
+      c.env,
+      `⚠️ gvnr: top-up SETTLED but NOT credited — customer owed ops.\n` +
+      `account: ${intent.accountId}\nops: ${intent.ops} ($${intent.body.credited_usd ?? '?'})\n` +
+      `at: ${failure.at}\nerror: ${failure.error}\nReconcile from KV key topup_credit_failed:*`,
+    ));
     rewriteJson(c, {
       ...intent.body,
       operations_remaining: null,
