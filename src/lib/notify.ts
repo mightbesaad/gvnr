@@ -69,6 +69,28 @@ export async function sendTelegramAlert(
   }
 }
 
+// Plain-text ops/money-critical email alert (e.g. settled-but-not-credited top-up). Sent from
+// the same verified FROM_ADDRESS as approval mail. No-ops when the Resend key or recipient are
+// unset; best-effort, never throws.
+export async function sendOpsEmailAlert(
+  apiKey: string | undefined,
+  to: string | undefined,
+  subject: string,
+  text: string,
+): Promise<EmailDispatchStatus> {
+  if (!apiKey || !to) return 'skipped_no_key';
+  try {
+    const res = await fetch(RESEND_ENDPOINT, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: FROM_ADDRESS, to: [to], subject, text }),
+    });
+    return res.ok ? 'sent' : 'failed';
+  } catch {
+    return 'failed';
+  }
+}
+
 export async function sendApprovalEmail(
   apiKey: string | undefined,
   to: string,

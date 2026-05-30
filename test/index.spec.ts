@@ -1,7 +1,7 @@
 import { env, SELF } from 'cloudflare:test';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { parseTopupUsd, MIN_TOPUP_USD, MAX_TOPUP_USD, shouldCreditAfterSettle, type TopupIntent } from '../src/lib/x402';
-import { sendTelegramAlert } from '../src/lib/notify';
+import { sendTelegramAlert, sendOpsEmailAlert } from '../src/lib/notify';
 
 // ── RPC mock helpers ─────────────────────────────────────────────────────────
 
@@ -314,6 +314,11 @@ describe('sendTelegramAlert (ops alerts)', () => {
     const status = await sendTelegramAlert({ TELEGRAM_BOT_TOKEN: 'BOT', TELEGRAM_CHAT_ID: '42' }, 'alert');
     expect(status).toBe('sent');
     expect(calledUrl).toContain('/botBOT/sendMessage');
+  });
+
+  it('email alert no-ops when the Resend key or recipient is missing', async () => {
+    expect(await sendOpsEmailAlert(undefined, 'ops@gvnr.dev', 's', 't')).toBe('skipped_no_key');
+    expect(await sendOpsEmailAlert('re_key', undefined, 's', 't')).toBe('skipped_no_key');
   });
 });
 
