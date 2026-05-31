@@ -3,7 +3,7 @@
   "name": "dev.gvnr/gvnr",
   "title": "Gvnr",
   "description": "AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "websiteUrl": "https://gvnr.dev",
   "repository": {
     "url": "https://github.com/mightbesaad/gvnr",

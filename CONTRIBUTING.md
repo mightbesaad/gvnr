@@ -11,7 +11,17 @@ npm install
 npm test
 ```
 
-100/100 tests should pass. If they don't, that's a real signal — open an issue with your environment details.
+The full test suite should pass. If it doesn't, that's a real signal — open an issue with your environment details.
+
+## Hygiene & hooks
+
+This repo guards against accidentally shipping private/identity strings:
+
+```bash
+git config core.hooksPath budget-governor/scripts/hooks   # one-time, from the infra repo root
+```
+
+That enables a pre-commit gate (`scripts/check-hygiene.mjs`) that fails if scrubbed identity terms reappear. CI runs the same check plus `gitleaks` for secret values. Run it manually any time with `node scripts/check-hygiene.mjs`.
 
 ## What's useful right now
 

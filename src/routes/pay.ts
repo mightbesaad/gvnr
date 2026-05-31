@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { Env } from '../lib/types';
+import { REPO_URL, REPO_ISSUES_URL } from '../lib/links';
 import { PACKS, type PackName } from '../lib/x402';
 import { NETWORK_CONFIGS, type NetworkKey, usdToRawAmount, verifyUsdcTransfer, USDC_DECIMALS } from '../lib/chain';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
@@ -340,9 +341,9 @@ function payPage(d: PageData): string {
       <span>·</span>
       <a href="/tos">Terms &amp; Refund Policy</a>
       <span>·</span>
-      <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">Support</a>
+      <a href="${REPO_ISSUES_URL}" target="_blank" rel="noopener">Support</a>
       <span>·</span>
-      <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
+      <a href="${REPO_URL}" target="_blank" rel="noopener">GitHub</a>
     </div>
   </footer>
 </div>

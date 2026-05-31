@@ -1,0 +1,11 @@
+#!/bin/sh
+# Pre-commit hygiene gate for the public-bound budget-governor/ tree.
+# Enable once per clone:  git config core.hooksPath budget-governor/scripts/hooks
+# Resolves the checker relative to this hook so it works from any repo root.
+HOOK_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+node "$HOOK_DIR/../check-hygiene.mjs" || {
+  echo "" >&2
+  echo "pre-commit blocked: hygiene check failed (scrubbed identity terms in budget-governor/)." >&2
+  echo "Fix the lines above, or 'git commit --no-verify' to bypass intentionally." >&2
+  exit 1
+}

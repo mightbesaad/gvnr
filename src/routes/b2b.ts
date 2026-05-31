@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../lib/types';
+import { REPO_URL, REPO_ISSUES_URL } from '../lib/links';
 
 const b2b = new Hono<{ Bindings: Env }>();
 
@@ -77,7 +78,7 @@ b2b.get('/', (c) => {
         <p>Direct contact &mdash; the maintainer reads and replies:</p>
         <p><a href="mailto:admin@gvnr.dev">admin@gvnr.dev</a></p>
         <p>Bug reports, feature requests, public issues:</p>
-        <p><a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">github.com/mightbesaad/gvnr/issues</a></p>
+        <p><a href="${REPO_ISSUES_URL}" target="_blank" rel="noopener">github.com/mightbesaad/gvnr/issues</a></p>
       </div>
     </section>
 
@@ -87,7 +88,7 @@ b2b.get('/', (c) => {
         <span>·</span>
         <a href="/tos">Terms &amp; Privacy</a>
         <span>·</span>
-        <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
+        <a href="${REPO_URL}" target="_blank" rel="noopener">GitHub</a>
         <span>·</span>
         <a href="mailto:admin@gvnr.dev">admin@gvnr.dev</a>
       </div>

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../lib/types';
+import { REPO_URL, REPO_ISSUES_URL } from '../lib/links';
 
 const tos = new Hono<{ Bindings: Env }>();
 
@@ -63,7 +64,7 @@ tos.get('/', (c) => {
     <section>
       <h2>Refund Policy</h2>
       <p>USDC transfers on the Base blockchain are irreversible on-chain. <strong>Credits are non-refundable once purchased.</strong></p>
-      <p>If you experience a verifiable service error — for example, a payment that reached our receiver address but was not credited to your account due to a fault on our end — open an issue on <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">GitHub</a> with your transaction hash and API key. We will review and credit your account at our discretion.</p>
+      <p>If you experience a verifiable service error — for example, a payment that reached our receiver address but was not credited to your account due to a fault on our end — open an issue on <a href="${REPO_ISSUES_URL}" target="_blank" rel="noopener">GitHub</a> with your transaction hash and API key. We will review and credit your account at our discretion.</p>
       <p>We do not issue refunds for unused credits, incorrectly sized packs, or costs incurred by your agents.</p>
       <p><strong>Overpayments.</strong> If you send more USDC than the pack price (for example, rounding from an exchange withdrawal, or sending $20 to a $19 pack), your account is credited with the pack's nominal amount only. Excess is logged for manual review and is not auto-refunded; contact support via GitHub Issues with your transaction hash if you need the overpayment reviewed.</p>
     </section>
@@ -84,16 +85,16 @@ tos.get('/', (c) => {
 
     <section>
       <h2>Support</h2>
-      <p>For questions, issues, or payment disputes: <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">GitHub Issues</a></p>
+      <p>For questions, issues, or payment disputes: <a href="${REPO_ISSUES_URL}" target="_blank" rel="noopener">GitHub Issues</a></p>
     </section>
 
     <footer>
       <div class="footer-row">
         <a href="/">Home</a>
         <span>·</span>
-        <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
+        <a href="${REPO_URL}" target="_blank" rel="noopener">GitHub</a>
         <span>·</span>
-        <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">Support</a>
+        <a href="${REPO_ISSUES_URL}" target="_blank" rel="noopener">Support</a>
       </div>
     </footer>
   </div>

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Context, Next } from 'hono';
 import type { Env } from './lib/types';
+import { REPO_URL, REPO_ISSUES_URL } from './lib/links';
 import { buildX402Middleware, parseTopupUsd, shouldCreditAfterSettle, type TopupIntent } from './lib/x402';
 import { mcpHandler } from './routes/mcp';
 import accountRoutes from './routes/account';
@@ -152,7 +153,7 @@ app.get('/.well-known/mcp.json', (c) => {
   return c.json({
     name: 'Gvnr',
     description: 'x402-paying AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges. One MCP endpoint, pay-as-you-go in USDC on Base.',
-    version: '1.7.0',
+    version: '1.8.0',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
     authentication: {
@@ -213,7 +214,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Gvnr', version: '1.7.0', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
+    info: { title: 'Gvnr', version: '1.8.0', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
@@ -1082,7 +1083,7 @@ app.get('/', (c) => {
         <a href="#compose">Compose</a>
         <a href="#quickstart">Docs</a>
         <a href="#pricing">Pricing</a>
-        <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
+        <a href="${REPO_URL}" target="_blank" rel="noopener">GitHub</a>
         <a class="status-pill" href="/status"><span class="dot"></span>Status</a>
         <button class="topcta" onclick="getApiKey()">Get API key</button>
       </nav>
@@ -1157,7 +1158,7 @@ app.get('/', (c) => {
       <span class="nav-dot">·</span>
       <a href="/.well-known/mcp.json">MCP card</a>
       <span class="nav-dot">·</span>
-      <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
+      <a href="${REPO_URL}" target="_blank" rel="noopener">GitHub</a>
     </nav>
 
     <section id="features">
@@ -1425,13 +1426,13 @@ curl https://gvnr.dev/v1/approval/check/APPROVAL_ID \\
         <span>·</span>
         <a href="/status">Status</a>
         <span>·</span>
-        <a href="https://github.com/mightbesaad/gvnr" target="_blank" rel="noopener">GitHub</a>
+        <a href="${REPO_URL}" target="_blank" rel="noopener">GitHub</a>
         <span>·</span>
         <a href="/tos">Terms &amp; Privacy</a>
         <span>·</span>
         <a href="mailto:admin@gvnr.dev">admin@gvnr.dev</a>
         <span>·</span>
-        <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">Support</a>
+        <a href="${REPO_ISSUES_URL}" target="_blank" rel="noopener">Support</a>
       </div>
     </footer>
   </div>
@@ -1623,7 +1624,7 @@ app.get('/status', (c) => {
   </div>
 
   <dl class="meta">
-    <dt>Version</dt><dd>1.7.0</dd>
+    <dt>Version</dt><dd>1.8.0</dd>
     <dt>Network</dt><dd>${c.env.X402_NETWORK} (${networkName})</dd>
     <dt>USDC receiver</dt><dd>${c.env.PAYTO_ADDRESS}</dd>
   </dl>
@@ -1633,7 +1634,7 @@ app.get('/status', (c) => {
   <footer>
     <a href="/">Home</a>
     <a href="/health">/health</a>
-    <a href="https://github.com/mightbesaad/gvnr/issues" target="_blank" rel="noopener">Report an issue</a>
+    <a href="${REPO_ISSUES_URL}" target="_blank" rel="noopener">Report an issue</a>
   </footer>
 </div>
 
