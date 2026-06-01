@@ -873,6 +873,7 @@ app.get('/', (c) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="talentapp:project_verification" content="82bcd300cc93e350e16e2cdbceae5af45cebd031cab5a62253e03c3fb958a62e161e9e00db388dd46d0d182f8620de22f44f3c60eeba3b84f8cba870b05df0e8">
   <title>Gvnr — AI agent substrate</title>
   <meta name="description" content="AI agent substrate — real-time spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, settled in USDC on Base.">
   <meta property="og:title" content="Gvnr">
