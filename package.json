@@ -3,10 +3,14 @@
 	"version": "0.0.0",
 	"private": true,
 	"scripts": {
-		"deploy": "wrangler deploy",
+		"build:widget": "node scripts/build-widget.mjs",
+		"deploy": "node scripts/build-widget.mjs && wrangler deploy",
 		"dev": "wrangler dev",
+		"predev": "node scripts/build-widget.mjs",
 		"start": "wrangler dev",
+		"prestart": "node scripts/build-widget.mjs",
 		"test": "vitest",
+		"pretest": "node scripts/build-widget.mjs",
 		"cf-typegen": "wrangler types",
 		"gen-types": "npx openapi-typescript@latest https://gvnr.dev/openapi.json -o types/gvnr.d.ts",
 		"stress": "node scripts/stress-security.mjs"
@@ -20,6 +24,7 @@
 	},
 	"dependencies": {
 		"@coinbase/x402": "^2.1.0",
+		"@modelcontextprotocol/ext-apps": "^1.7.3",
 		"@modelcontextprotocol/sdk": "^1.29.0",
 		"@x402/core": "^2.12.0",
 		"@x402/evm": "^2.12.0",

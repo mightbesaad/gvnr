@@ -169,3 +169,6 @@ dist
 # OpenAPI-generated types (regenerate via `npm run gen-types`)
 
 types/gvnr.d.ts
+
+# Widget bundle inlined at build time (regenerate via `npm run build:widget`)
+src/widgets/dashboard.generated.ts

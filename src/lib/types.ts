@@ -14,6 +14,15 @@ export interface EnvelopeRecord {
   };
 }
 
+export interface ClearanceEvent {
+  agent_id: string;
+  model: string;
+  est_usd: number;
+  approved: boolean;
+  reason?: 'no_credits' | 'no_envelope' | 'envelope_exceeded';
+  ts: number; // unix ms
+}
+
 export interface RateEnvelopeRecord {
   provider: string;     // 'anthropic', 'openai', 'bedrock', etc. — informational
   model: string;        // e.g. 'claude-sonnet-4-6'

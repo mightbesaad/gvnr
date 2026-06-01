@@ -1964,3 +1964,121 @@ describe('runClearance edge cases', () => {
     expect((await res.json<{ approved: boolean }>()).approved).toBe(true);
   });
 });
+
+// ── MCP Apps: view_dashboard widget ───────────────────────────────────────────
+
+interface DashboardPayload {
+  account: { operations_remaining: number };
+  envelopes: Array<{
+    agent_id: string;
+    limit_usd: number;
+    spent_usd: number;
+    remaining_usd: number;
+    pct_used: number;
+    window: 'daily' | 'session';
+    reset_at: number;
+  }>;
+  recent: Array<{ agent_id: string; model: string; est_usd: number; approved: boolean; reason?: string; ts: number }>;
+}
+
+const DASHBOARD_URI = 'ui://widgets/dashboard.html';
+const HAIKU = 'claude-haiku-4-5-20251001';
+
+async function viewDashboard(apiKey: string): Promise<{ data: DashboardPayload; summary: string }> {
+  const body = await mcpCall(apiKey, 'tools/call', { name: 'view_dashboard', arguments: {} });
+  if (!body.result) throw new Error(`MCP error: ${JSON.stringify(body.error)}`);
+  const content = body.result.content;
+  return { data: JSON.parse(content[0].text), summary: content[1].text };
+}
+
+describe('MCP Apps: view_dashboard', () => {
+  it('is listed as a tool carrying the UI resource meta', async () => {
+    const { apiKey } = await provisionAccount();
+    const body = await mcpCall(apiKey, 'tools/list', {});
+    const tools = (body as unknown as { result: { tools: Array<{ name: string; _meta?: Record<string, unknown> }> } }).result.tools;
+    const tool = tools.find((t) => t.name === 'view_dashboard');
+    expect(tool).toBeDefined();
+    const meta = tool!._meta ?? {};
+    const flat = meta['ui/resourceUri'];
+    const nested = (meta.ui as { resourceUri?: string } | undefined)?.resourceUri;
+    expect(flat ?? nested).toBe(DASHBOARD_URI);
+  });
+
+  it('serves the widget HTML resource with the mcp-app mime type', async () => {
+    const { apiKey } = await provisionAccount();
+    const body = await mcpCall(apiKey, 'resources/read', { uri: DASHBOARD_URI });
+    const contents = (body as unknown as { result: { contents: Array<{ uri: string; mimeType: string; text: string }> } }).result.contents;
+    expect(contents[0].uri).toBe(DASHBOARD_URI);
+    expect(contents[0].mimeType).toBe('text/html;profile=mcp-app');
+    expect(contents[0].text).toContain('GvnrDashboard');
+  });
+
+  it('returns quota + per-agent envelope rows plus a human summary', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10);
+    await mcpToolCall(apiKey, 'set_envelope', { agent_id: 'dash-agent', limit_usd: 5, window: 'daily' });
+
+    const { data, summary } = await viewDashboard(apiKey);
+    expect(data.account.operations_remaining).toBe(10);
+    const row = data.envelopes.find((e) => e.agent_id === 'dash-agent');
+    expect(row).toBeDefined();
+    expect(row!.limit_usd).toBe(5);
+    expect(row!.remaining_usd).toBe(5);
+    expect(row!.pct_used).toBe(0);
+    expect(summary).toContain('quota');
+  });
+
+  it('normalizes an expired daily window to zero effective spend (lazy reset)', async () => {
+    const { apiKey, accountId } = await provisionAccount();
+    await seedCredits(apiKey, 10);
+
+    // Plant a fully-spent daily envelope whose window has already elapsed (no clearance since).
+    const stub = env.ACCOUNT.get(env.ACCOUNT.idFromName(accountId));
+    await stub.setEnvelope('stale-agent', {
+      limit_usd: 4,
+      spent_usd: 4,
+      window: 'daily',
+      reset_at: Date.now() - 1000,
+    });
+
+    const { data } = await viewDashboard(apiKey);
+    const row = data.envelopes.find((e) => e.agent_id === 'stale-agent')!;
+    expect(row.spent_usd).toBe(0);
+    expect(row.remaining_usd).toBe(4);
+    expect(row.pct_used).toBe(0);
+  });
+
+  it('caps the recent-activity feed at 20, newest last, dropping the oldest', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 30);
+    await mcpToolCall(apiKey, 'set_envelope', { agent_id: 'ring-agent', limit_usd: 1000, window: 'session' });
+
+    // 21 clears with strictly increasing token counts → distinguishable est_usd per event.
+    for (let i = 1; i <= 21; i++) {
+      await mcpToolCall(apiKey, 'budget_clear', { agent_id: 'ring-agent', model: HAIKU, estimated_tokens: i * 1000 });
+    }
+
+    const { data } = await viewDashboard(apiKey);
+    expect(data.recent.length).toBe(20);
+    // Oldest (call #1, smallest est) dropped; newest (call #21, largest est) is last.
+    expect(data.recent[19].est_usd).toBeGreaterThan(data.recent[0].est_usd);
+    // ts non-decreasing (newest last).
+    for (let i = 1; i < data.recent.length; i++) {
+      expect(data.recent[i].ts).toBeGreaterThanOrEqual(data.recent[i - 1].ts);
+    }
+    expect(data.recent.every((e) => e.approved)).toBe(true);
+  });
+
+  it('records denied clearances in the recent feed with a reason', async () => {
+    const { apiKey } = await provisionAccount();
+    await seedCredits(apiKey, 10);
+    // No envelope set → clearance denied with no_envelope.
+    await mcpToolCall(apiKey, 'budget_clear', { agent_id: 'no-env-agent', model: HAIKU, estimated_tokens: 100 });
+
+    const { data } = await viewDashboard(apiKey);
+    const evt = data.recent.find((e) => e.agent_id === 'no-env-agent');
+    expect(evt).toBeDefined();
+    expect(evt!.approved).toBe(false);
+    expect(evt!.reason).toBe('no_envelope');
+  });
+});

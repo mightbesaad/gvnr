@@ -1,10 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { registerAppTool, registerAppResource, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 import { z } from 'zod';
 import type { Context } from 'hono';
 import type { Env } from '../lib/types';
+import type { AccountState } from '../lib/account-do';
 import { getAccount } from '../lib/kv';
-import { nextDailyReset } from '../lib/models';
+import { nextDailyReset, roundUsd } from '../lib/models';
+import { DASHBOARD_HTML } from '../widgets/dashboard.generated';
 import { checkIdempotency, DEFAULT_TTL_SECONDS, MAX_TTL_SECONDS } from './idempotency';
 import { requestApproval, checkApproval } from './approval';
 import {
@@ -14,6 +17,49 @@ import {
   MAX_ACTION_SUMMARY_CHARS,
   MAX_AGENT_ID_CHARS,
 } from '../lib/approval';
+
+const DASHBOARD_RESOURCE_URI = 'ui://widgets/dashboard.html';
+
+// Map DO state into the dashboard payload. Computes EFFECTIVE spend: a daily envelope whose
+// window has elapsed without an intervening clearance still holds stale spent_usd in the DO
+// (reset is lazy, in runClearance), so reads here normalize it to a fresh window.
+async function buildDashboard(stub: DurableObjectStub<AccountState>) {
+  const [operations, envelopeMap, recent] = await Promise.all([
+    stub.getOperations(),
+    stub.listEnvelopes(),
+    stub.listRecent(),
+  ]);
+
+  const now = Date.now();
+  const envelopes = Object.entries(envelopeMap).map(([agent_id, e]) => {
+    const expired = e.window === 'daily' && now >= e.reset_at;
+    const spent = expired ? 0 : e.spent_usd;
+    const remaining = Math.max(0, e.limit_usd - spent);
+    const pct = e.limit_usd > 0 ? Math.min(100, (spent / e.limit_usd) * 100) : 0;
+    return {
+      agent_id,
+      limit_usd: roundUsd(e.limit_usd),
+      spent_usd: roundUsd(spent),
+      remaining_usd: roundUsd(remaining),
+      pct_used: Math.round(pct * 10) / 10,
+      window: e.window,
+      reset_at: e.reset_at,
+    };
+  });
+
+  // Map recent events to an explicit allow-list of fields so a future addition to
+  // ClearanceEvent can't silently leak into the (model-visible) tool result.
+  const recentRows = recent.map((r) => ({
+    agent_id: r.agent_id,
+    model: r.model,
+    est_usd: r.est_usd,
+    approved: r.approved,
+    reason: r.reason,
+    ts: r.ts,
+  }));
+
+  return { account: { operations_remaining: operations }, envelopes, recent: recentRows };
+}
 
 export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Response> {
   const apiKey =
@@ -242,6 +288,52 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
       const result = await checkApproval(c.env, accountId, approval_id);
       return { content: [{ type: 'text' as const, text: JSON.stringify(result.body) }] };
     },
+  );
+
+  registerAppTool(
+    server,
+    'view_dashboard',
+    {
+      description:
+        'Open an interactive, read-only spend dashboard for this account: an operation-quota ' +
+        'gauge plus a live bar per agent showing spent vs. envelope limit, remaining USD, and ' +
+        'daily-reset countdown, with a recent-clearance activity feed. Use when a human asks ' +
+        'how their budget or an agent\'s spend is doing. The panel auto-refreshes while open. ' +
+        'Takes no arguments — it reports on the account tied to your API key.',
+      inputSchema: {},
+      annotations: {
+        title: 'Spend Dashboard',
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      _meta: { ui: { resourceUri: DASHBOARD_RESOURCE_URI } },
+    },
+    async () => {
+      const data = await buildDashboard(stub);
+      const over75 = data.envelopes.filter((e) => e.pct_used >= 75).length;
+      const summary =
+        `${data.envelopes.length} agent envelope(s)` +
+        (over75 ? `, ${over75} over 75% of cap` : '') +
+        `; quota ${data.account.operations_remaining.toLocaleString()} ops.`;
+      return {
+        content: [
+          { type: 'text' as const, text: JSON.stringify(data) },
+          { type: 'text' as const, text: summary },
+        ],
+      };
+    },
+  );
+
+  registerAppResource(
+    server,
+    'Spend Dashboard',
+    DASHBOARD_RESOURCE_URI,
+    {},
+    async () => ({
+      contents: [{ uri: DASHBOARD_RESOURCE_URI, mimeType: RESOURCE_MIME_TYPE, text: DASHBOARD_HTML }],
+    }),
   );
 
   const transport = new WebStandardStreamableHTTPServerTransport({

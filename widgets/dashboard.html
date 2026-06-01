@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: transparent;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --card: #f6f7f9;
+    --line: #e5e7eb;
+    --track: #e5e7eb;
+    --green: #16a34a;
+    --amber: #d97706;
+    --red: #dc2626;
+    color-scheme: light;
+  }
+  :root.dark {
+    --fg: #e7e7ea;
+    --muted: #9aa0aa;
+    --card: #1c1f24;
+    --line: #2b2f36;
+    --track: #2b2f36;
+    --green: #22c55e;
+    --amber: #f59e0b;
+    --red: #f87171;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font: 14px/1.45 system-ui, -apple-system, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    margin: 0;
+    padding: 12px;
+  }
+  h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .quota { display: flex; align-items: baseline; gap: 8px; margin-bottom: 16px; }
+  .quota .num { font-size: 28px; font-weight: 700; }
+  .quota .lbl { color: var(--muted); }
+  .env { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+  .env-top { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .env-id { font-weight: 600; word-break: break-all; }
+  .env-meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .bar { height: 8px; border-radius: 999px; background: var(--track); overflow: hidden; }
+  .bar > span { display: block; height: 100%; border-radius: 999px; transition: width .3s; }
+  .env-fig { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .empty { color: var(--muted); padding: 12px 0; }
+  ul.recent { list-style: none; margin: 14px 0 0; padding: 0; }
+  ul.recent li { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line); font-size: 12px; }
+  ul.recent .mark { width: 14px; text-align: center; }
+  ul.recent .ok { color: var(--green); }
+  ul.recent .no { color: var(--red); }
+  ul.recent .rid { font-weight: 600; }
+  ul.recent .rmodel { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  ul.recent .rcost { color: var(--muted); }
+</style>
+<body>
+  <div id="root"><div class="empty">Loading spend dashboard…</div></div>
+
+  <script type="module">
+    /*__EXT_APPS_BUNDLE__*/
+    const { App } = globalThis.ExtApps;
+
+    const root = document.getElementById("root");
+    const fmtUsd = (n) => "$" + (Math.round(n * 100) / 100).toFixed(2);
+
+    function colorFor(pct) {
+      if (pct >= 95) return "var(--red)";
+      if (pct >= 75) return "var(--amber)";
+      return "var(--green)";
+    }
+
+    function countdown(resetAt) {
+      const ms = resetAt - Date.now();
+      if (ms <= 0) return "resets soon";
+      const h = Math.floor(ms / 3.6e6);
+      const m = Math.floor((ms % 3.6e6) / 6e4);
+      return h > 0 ? `resets in ${h}h ${m}m` : `resets in ${m}m`;
+    }
+
+    function render(data) {
+      const ops = data?.account?.operations_remaining ?? 0;
+      const envs = Array.isArray(data?.envelopes) ? data.envelopes : [];
+      const recent = Array.isArray(data?.recent) ? data.recent : [];
+
+      const parts = [];
+      parts.push(
+        `<div class="quota"><span class="num">${ops.toLocaleString()}</span>` +
+        `<span class="lbl">operations remaining</span></div>`,
+      );
+
+      parts.push(`<h2>Agent envelopes</h2>`);
+      if (envs.length === 0) {
+        parts.push(`<div class="empty">No envelopes set yet. Use set_envelope to add a per-agent spend cap.</div>`);
+      } else {
+        for (const e of envs) {
+          const pct = Math.max(0, Math.min(100, e.pct_used ?? 0));
+          parts.push(
+            `<div class="env">` +
+              `<div class="env-top"><span class="env-id"></span><span class="env-meta"></span></div>` +
+              `<div class="bar"><span style="width:${pct}%;background:${colorFor(pct)}"></span></div>` +
+              `<div class="env-fig"><span></span><span></span></div>` +
+            `</div>`,
+          );
+        }
+      }
+
+      if (recent.length > 0) {
+        parts.push(`<h2 style="margin-top:16px">Recent activity</h2>`);
+        parts.push(`<ul class="recent"></ul>`);
+      }
+
+      root.innerHTML = parts.join("");
+
+      // Fill text via textContent (never innerHTML) to keep untrusted agent_ids safe.
+      const envEls = root.querySelectorAll(".env");
+      envs.forEach((e, i) => {
+        const el = envEls[i];
+        if (!el) return;
+        const pct = Math.max(0, Math.min(100, e.pct_used ?? 0));
+        el.querySelector(".env-id").textContent = e.agent_id;
+        el.querySelector(".env-meta").textContent = `${meta_for(e)} · ${pct.toFixed(0)}%`;
+        const figs = el.querySelectorAll(".env-fig span");
+        figs[0].textContent = `${fmtUsd(e.spent_usd)} / ${fmtUsd(e.limit_usd)}`;
+        figs[1].textContent = `${fmtUsd(e.remaining_usd)} left`;
+      });
+
+      const ul = root.querySelector("ul.recent");
+      if (ul) {
+        // newest first for display
+        [...recent].reverse().forEach((r) => {
+          const li = document.createElement("li");
+          const mark = document.createElement("span");
+          mark.className = "mark " + (r.approved ? "ok" : "no");
+          mark.textContent = r.approved ? "✓" : "✗";
+          const rid = document.createElement("span");
+          rid.className = "rid";
+          rid.textContent = r.agent_id;
+          const rmodel = document.createElement("span");
+          rmodel.className = "rmodel";
+          rmodel.textContent = r.approved ? r.model : (r.reason || "denied");
+          const rcost = document.createElement("span");
+          rcost.className = "rcost";
+          rcost.textContent = fmtUsd(r.est_usd);
+          li.append(mark, rid, rmodel, rcost);
+          ul.append(li);
+        });
+      }
+    }
+
+    function meta_for(e) {
+      return e.window === "daily" ? countdown(e.reset_at) : "session";
+    }
+
+    (async () => {
+      const app = new App({ name: "GvnrDashboard", version: "1.0.0" }, {}, { autoResize: true });
+
+      const applyTheme = (t) =>
+        document.documentElement.classList.toggle("dark", t === "dark");
+
+      // Initial data arrives host→widget when Claude calls view_dashboard.
+      app.ontoolresult = ({ content }) => {
+        try { render(JSON.parse(content[0].text)); } catch (_) { /* leave loading state */ }
+      };
+      app.onhostcontextchanged = (ctx) => applyTheme(ctx?.theme);
+
+      await app.connect();
+      applyTheme(app.getHostContext()?.theme);
+
+      // Refresh = widget→server; the result comes back on the AWAITED return value,
+      // NOT through ontoolresult. (Wiring it through ontoolresult freezes the panel.)
+      async function refresh() {
+        try {
+          const res = await app.callServerTool({ name: "view_dashboard", arguments: {} });
+          render(JSON.parse(res.content[0].text));
+        } catch (_) { /* transient — keep last render */ }
+      }
+      const id = setInterval(refresh, 15_000);
+      addEventListener("pagehide", () => clearInterval(id));
+    })();
+  </script>
+</body>
+</html>
