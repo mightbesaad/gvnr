@@ -1,0 +1,17 @@
+# gvnr gitleaks config
+# Extends the default ruleset and allowlists documentation placeholders only.
+# The default `curl-auth-header` rule flags the `Authorization: Bearer bg_YOUR_KEY`
+# placeholder used throughout README.md examples as a high-entropy secret.
+# We allowlist the exact placeholder token (`bg_YOUR_KEY`) — NOT the `bg_` prefix —
+# so real API keys accidentally committed still trip the scanner.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documentation placeholders, not real secrets"
+# Match against the whole line so the curl-auth-header rule's capture is covered.
+regexTarget = "line"
+regexes = [
+  '''bg_YOUR_KEY''',
+]
