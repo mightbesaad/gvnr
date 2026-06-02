@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-dev.gvnr%2Fgvnr-purple)](https://registry.modelcontextprotocol.io/v0.1/servers?search=dev.gvnr/gvnr)
 [![gvnr MCP server](https://glama.ai/mcp/servers/gvnrdev/gvnr/badges/score.svg)](https://glama.ai/mcp/servers/gvnrdev/gvnr)
+[![smithery badge](https://smithery.ai/badge/mightbesaad/gvnr)](https://smithery.ai/servers/mightbesaad/gvnr)
 
 Spend caps, rate coordination, idempotency, and a human-in-the-loop gate for AI agents — **enforced before the call, not after the invoice.** One MCP endpoint, settled via x402 (USDC on Base). No proxy, no self-hosting, no infrastructure to deploy.
 
