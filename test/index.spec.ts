@@ -1,5 +1,6 @@
-import { env, SELF } from 'cloudflare:test';
+import { env, SELF, createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import worker from '../src/index';
 import { parseTopupUsd, MIN_TOPUP_USD, MAX_TOPUP_USD, shouldCreditAfterSettle, type TopupIntent } from '../src/lib/x402';
 import { sendTelegramAlert, sendOpsEmailAlert } from '../src/lib/notify';
 
@@ -2080,5 +2081,44 @@ describe('MCP Apps: view_dashboard', () => {
     expect(evt).toBeDefined();
     expect(evt!.approved).toBe(false);
     expect(evt!.reason).toBe('no_envelope');
+  });
+});
+
+// ── Signup trial ops (SIGNUP_TRIAL_OPS) ───────────────────────────────────────
+
+describe('signup trial ops', () => {
+  // Suite default is "0" (vitest.config) so the rest of the suite keeps its 0-op baseline.
+  // Mutating the cloudflare:test `env` does NOT reach the separate SELF worker, so we drive
+  // the worker directly with a per-call env override; storage (KV + DO) is shared with SELF.
+  const trialEnv = { ...env, SIGNUP_TRIAL_OPS: '25' };
+
+  async function provisionWithTrial(): Promise<{ api_key: string; operations_remaining: number; status: number }> {
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(new Request('http://localhost/v1/account', { method: 'POST' }), trialEnv as typeof env, ctx);
+    await waitOnExecutionContext(ctx);
+    const body = await res.json<{ api_key: string; operations_remaining: number }>();
+    return { ...body, status: res.status };
+  }
+
+  it('a fresh account reports the trial allotment on creation', async () => {
+    const { status, operations_remaining } = await provisionWithTrial();
+    expect(status).toBe(201);
+    expect(operations_remaining).toBe(25);
+  });
+
+  it('a fresh account can budget_clear without any topup (activation barrier removed)', async () => {
+    const { api_key } = await provisionWithTrial();
+    // Subsequent calls read the granted ops from shared DO storage — env-independent, so SELF is fine.
+    await SELF.fetch('http://localhost/v1/budget/envelope', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${api_key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'trial-agent', limit_usd: 5 }),
+    });
+    const clr = await SELF.fetch('http://localhost/v1/budget/clear', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${api_key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_id: 'trial-agent', model: 'claude-haiku-4-5-20251001', estimated_tokens: 100 }),
+    });
+    expect((await clr.json<{ approved: boolean }>()).approved).toBe(true);
   });
 });

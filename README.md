@@ -45,8 +45,10 @@ A `budget_clear` is approved only when **both** hold: the account has ops left i
 
 ```bash
 curl -X POST https://gvnr.dev/v1/account
-# { "api_key": "bg_...", "account_id": "..." }
+# { "api_key": "bg_...", "account_id": "...", "operations_remaining": 25 }
 ```
+
+New accounts include **25 free trial ops** — enough to run the full loop (set an envelope, `budget_clear`, `reconcile`) before you fund anything. Your `api_key` is the credential for every call; `account_id` is just an internal reference for support. Account creation is credential-only by design (agent-native) — **email is optional**, set separately via `POST /v1/account/notification-email`, and used only for human approval notices.
 
 ### 2. Top up your governance-op quota
 
@@ -135,7 +137,30 @@ curl -X POST \
 # { "ok": true, "drift_usd": 0.003, "remaining_usd": 4.991, "operations_remaining": 18999 }
 ```
 
-`reconcile` adjusts the **spend envelope** by the drift between your estimate and actual cost (the op quota is untouched). Anthropic, OpenAI, and Gemini all return `usage` fields with real token counts — pass those in to keep the envelope honest.
+`reconcile` adjusts the **spend envelope** by the drift between your estimate and actual cost (the op quota is untouched). You don't pass the model again — reconcile reuses the one from your prior `budget_clear`. Anthropic, OpenAI, and Gemini all return `usage` fields with real token counts — pass those in to keep the envelope honest.
+
+---
+
+## Human-in-the-loop approvals
+
+When an agent hits a denial or a sensitive action, pause for a human instead of failing:
+
+```bash
+# 1. Open a request — returns an approval_id and a mobile-friendly approval_url
+curl -X POST -H "Authorization: Bearer bg_YOUR_KEY" -H "Content-Type: application/json" \
+  -d '{"agent_id":"my-agent","action_summary":"Spend $40 on a research run","ttl_seconds":3600}' \
+  https://gvnr.dev/v1/approval/request
+# { "approval_id": "...", "approval_url": "https://gvnr.dev/approve/...", "expires_at": ... }
+
+# 2. The human opens approval_url and taps approve / deny (emailed if notification-email is set).
+
+# 3. Your agent polls until the decision lands:
+curl -H "Authorization: Bearer bg_YOUR_KEY" \
+  https://gvnr.dev/v1/approval/check/APPROVAL_ID
+# { "decision": "pending" }  →  "approved" | "denied" | "timeout"
+```
+
+The agent proceeds on `approved`, skips on `denied`, and handles `timeout` (no decision before `expires_at`) however it likes.
 
 ---
 
@@ -219,6 +244,18 @@ All endpoints except `POST /v1/account` require `Authorization: Bearer bg_YOUR_K
 
 Denial reasons: `no_credits` (op quota exhausted) · `no_envelope` (agent has no envelope) · `envelope_exceeded`
 
+### Status codes
+
+A **denial is not an HTTP error** — it's a `200` with a flag, so check the body, not the status:
+
+| Situation | HTTP | Body |
+|---|---|---|
+| `budget_clear` / `rate_check` allow **or** deny | `200` | `{ approved/allowed: true \| false, ... }` |
+| Top-up requires payment | `402` | x402 challenge (in the `payment-required` header; see Billing) |
+| Missing / invalid API key | `401` | `{ error }` |
+| Per-IP account-creation throttle | `429` | `{ error: "rate_limited", retry_after_ms }` |
+| Bad request body | `400` | `{ error, hint }` |
+
 ---
 
 ## Billing — governance ops, not your tokens
@@ -234,7 +271,7 @@ Top-ups are **pay-as-you-go at 1,000 ops/$1** in USDC on Base mainnet — name a
 | $39 | 39,000 | `/pay?usd=39` |
 | $79 | 79,000 | `/pay?usd=79` |
 
-Works with Base MCP, AgentKit, and any x402 client.
+Works with Base MCP, AgentKit, and any x402 client. The `402` challenge follows x402 v2 — payment requirements (network, USDC asset, amount, `payTo`) are returned in the **`payment-required` response header** (the body is empty), so an x402 client settles it automatically; you only hand-parse it if you're rolling your own.
 
 ---
 
@@ -247,7 +284,7 @@ Works with Base MCP, AgentKit, and any x402 client.
 
 ## Supported models
 
-Model pricing is a static lookup on the hot path — no external calls. The envelope's cost estimate uses these per-million-token rates (USD):
+Model pricing is a static lookup on the hot path — no external calls. The estimate deducted from the envelope is `rate(model) × estimated_tokens ÷ 1,000,000` (output rate for chat models, input rate for embeddings), reconciled to actual afterward. These are the per-million-token rates (USD):
 
 | Model | Input | Output |
 |---|---|---|

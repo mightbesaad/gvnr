@@ -52,4 +52,5 @@ export interface Env {
   TELEGRAM_BOT_TOKEN?: string; // optional — ops alerts (e.g. settled-but-not-credited top-ups)
   TELEGRAM_CHAT_ID?: string;   // optional — paired chat id for TELEGRAM_BOT_TOKEN
   ALERT_EMAIL?: string;        // optional — recipient for ops email alerts (paired with RESEND_API_KEY)
+  SIGNUP_TRIAL_OPS?: string;   // optional — free governance ops granted on POST /v1/account (prod: 25; tests: 0)
 }

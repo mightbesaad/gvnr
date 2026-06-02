@@ -34,7 +34,16 @@ account.post('/', async (c) => {
 
   await c.env.BUDGET_KV.put(`api:${keyHash}`, JSON.stringify({ account_id: accountId }));
 
-  return c.json({ api_key: apiKey, account_id: accountId }, 201);
+  // Grant a small trial allotment so a new operator can run the full loop (envelope →
+  // budget_clear → reconcile) before funding. Env-gated: prod sets SIGNUP_TRIAL_OPS, tests run at 0.
+  const trialOps = Number(c.env.SIGNUP_TRIAL_OPS ?? 0);
+  let operations_remaining = 0;
+  if (Number.isFinite(trialOps) && trialOps > 0) {
+    const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
+    ({ operations_remaining } = await stub.credit(trialOps));
+  }
+
+  return c.json({ api_key: apiKey, account_id: accountId, operations_remaining }, 201);
 });
 
 // GET /v1/account/balance — remaining governance-operation quota
