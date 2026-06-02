@@ -3,7 +3,7 @@
   "name": "dev.gvnr/gvnr",
   "title": "Gvnr",
   "description": "Budget & cost control for AI agents — per-agent spend caps + rate limits before each call.",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "websiteUrl": "https://gvnr.dev",
   "repository": {
     "url": "https://github.com/mightbesaad/gvnr",

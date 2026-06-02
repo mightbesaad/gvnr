@@ -83,7 +83,7 @@ describe('GET /status', () => {
     const text = await res.text();
     expect(text).toContain('All systems operational');
     expect(text).toContain('MCP endpoint');
-    expect(text).toContain('1.8.0');
+    expect(text).toContain('1.8.1');
   });
 });
 
@@ -1387,23 +1387,23 @@ describe('Agent Approval Bridge', () => {
 // ── Brand surface: MCP card and homepage reflect Slot 5 rename ───────────────
 
 describe('Slot 5 brand surface', () => {
-  it('mcp.json card name is "Gvnr" and version 1.8.0', async () => {
+  it('mcp.json card name is "Gvnr" and version 1.8.1', async () => {
     const res = await SELF.fetch('http://localhost/.well-known/mcp.json');
     expect(res.status).toBe(200);
     const body = await res.json<{ name: string; version: string; tools: { name: string }[] }>();
     expect(body.name).toBe('Gvnr');
-    expect(body.version).toBe('1.8.0');
+    expect(body.version).toBe('1.8.1');
     const toolNames = body.tools.map((t) => t.name);
     expect(toolNames).toContain('request_approval');
     expect(toolNames).toContain('check_approval');
   });
 
-  it('openapi.json title is "Gvnr" and version 1.8.0', async () => {
+  it('openapi.json title is "Gvnr" and version 1.8.1', async () => {
     const res = await SELF.fetch('http://localhost/openapi.json');
     expect(res.status).toBe(200);
     const body = await res.json<{ info: { title: string; version: string }; paths: Record<string, unknown> }>();
     expect(body.info.title).toBe('Gvnr');
-    expect(body.info.version).toBe('1.8.0');
+    expect(body.info.version).toBe('1.8.1');
     expect(body.paths['/v1/approval/request']).toBeDefined();
     expect(body.paths['/v1/approval/check/{approval_id}']).toBeDefined();
   });

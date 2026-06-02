@@ -153,7 +153,7 @@ app.get('/.well-known/mcp.json', (c) => {
   return c.json({
     name: 'Gvnr',
     description: 'x402-paying AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges. One MCP endpoint, pay-as-you-go in USDC on Base.',
-    version: '1.8.0',
+    version: '1.8.1',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
     authentication: {
@@ -214,7 +214,7 @@ app.get('/openapi.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     openapi: '3.1.0',
-    info: { title: 'Gvnr', version: '1.8.0', description: 'AI agent substrate — spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges.' },
+    info: { title: 'Gvnr', version: '1.8.1', description: 'Budget & cost control for AI agents — per-agent spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges, enforced before each call.' },
     servers: [{ url: 'https://gvnr.dev' }],
     components: {
       securitySchemes: {
@@ -1625,7 +1625,7 @@ app.get('/status', (c) => {
   </div>
 
   <dl class="meta">
-    <dt>Version</dt><dd>1.8.0</dd>
+    <dt>Version</dt><dd>1.8.1</dd>
     <dt>Network</dt><dd>${c.env.X402_NETWORK} (${networkName})</dd>
     <dt>USDC receiver</dt><dd>${c.env.PAYTO_ADDRESS}</dd>
   </dl>
