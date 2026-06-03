@@ -34,11 +34,7 @@ const DENY = [
 ];
 
 // Narrow, temporary exceptions. Remove each when its condition clears.
-const ALLOW = [
-  // README Glama badge — still gvnrdev/gvnr until punkpeye re-indexes the
-  // listing under mightbesaad/gvnr. Flip the badge + delete this line then.
-  /glama\.ai\/mcp\/servers\/gvnrdev\/gvnr/,
-];
+const ALLOW = [];
 
 // Tracked files we never scan as text. check-hygiene.mjs is self-excluded —
 // it must spell out the forbidden terms to detect them (linters ignore their
