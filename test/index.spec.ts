@@ -1774,11 +1774,16 @@ describe('MCP tools → Durable Object routing', () => {
     expect(bal.operations_remaining).toBe(7);
   });
 
-  it('returns 401 for missing api_key', async () => {
+  it('returns 401 for missing api_key on a gated method (tools/call)', async () => {
     const res = await SELF.fetch('http://localhost/mcp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'get_balance', arguments: {} },
+      }),
     });
     expect(res.status).toBe(401);
   });
@@ -1789,6 +1794,46 @@ describe('MCP tools → Durable Object routing', () => {
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
     });
+    expect(res.status).toBe(401);
+  });
+});
+
+// ── Unauthenticated discovery (directory indexers: Glama, Smithery, inspectors) ─
+// initialize + tools/list must succeed WITHOUT an api_key so indexers can
+// enumerate and score the tool surface; execution (tools/call) stays gated.
+
+async function mcpDiscover(method: string, params: object) {
+  return SELF.fetch('http://localhost/mcp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+}
+
+describe('MCP unauthenticated discovery', () => {
+  it('tools/list returns all 10 tools without an api_key', async () => {
+    const res = await mcpDiscover('tools/list', {});
+    expect(res.status).toBe(200);
+    const body = await res.json<{ result?: { tools: Array<{ name: string }> } }>();
+    const names = (body.result?.tools ?? []).map((t) => t.name);
+    expect(names).toHaveLength(10);
+    expect(names).toContain('budget_clear');
+    expect(names).toContain('view_dashboard');
+  });
+
+  it('initialize succeeds without an api_key', async () => {
+    const res = await mcpDiscover('initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'glama-probe', version: '1.0' },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ result?: { serverInfo?: { name: string } } }>();
+    expect(body.result?.serverInfo?.name).toBe('gvnr');
+  });
+
+  it('tools/call is still rejected without an api_key', async () => {
+    const res = await mcpDiscover('tools/call', { name: 'get_balance', arguments: {} });
     expect(res.status).toBe(401);
   });
 });

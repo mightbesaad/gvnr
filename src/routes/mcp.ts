@@ -66,17 +66,52 @@ export async function mcpHandler(c: Context<{ Bindings: Env }>): Promise<Respons
     c.req.query('api_key') ||
     c.req.header('Authorization')?.slice(7);
 
-  if (!apiKey) {
-    return c.json({ error: 'missing_api_key' }, 401);
+  // Discovery methods (handshake + listing) are served WITHOUT auth so directory
+  // indexers (Glama, Smithery, MCP inspectors) can enumerate the tool surface to
+  // score it. They return only public tool/resource *definitions* — already
+  // published in the README, OpenAPI spec, and MCP registry — and never touch
+  // account state. Execution (tools/call, resources/read) stays gated below.
+  const PUBLIC_METHODS = new Set([
+    'initialize',
+    'notifications/initialized',
+    'ping',
+    'tools/list',
+    'resources/list',
+    'resources/templates/list',
+    'prompts/list',
+  ]);
+  let rpcMethod: string | undefined;
+  try {
+    const body = (await c.req.raw.clone().json()) as { method?: string };
+    rpcMethod = body?.method;
+  } catch {
+    // Unparseable/non-JSON body: fall through to the authenticated path.
   }
 
-  const account = await getAccount(c.env.BUDGET_KV, apiKey);
-  if (!account) {
-    return c.json({ error: 'invalid_api_key' }, 401);
+  let accountId: string;
+  let stub: DurableObjectStub<AccountState>;
+  if (rpcMethod !== undefined && PUBLIC_METHODS.has(rpcMethod) && !apiKey) {
+    // Unauthenticated discovery: no account context. The tool handlers close over
+    // `stub`/`accountId` but are never invoked for the methods above; guard the
+    // stub so any future path that does reach a handler fails loudly rather than
+    // silently acting without an account.
+    accountId = '';
+    stub = new Proxy({} as DurableObjectStub<AccountState>, {
+      get() {
+        throw new Error('account stub accessed on an unauthenticated MCP request');
+      },
+    });
+  } else {
+    if (!apiKey) {
+      return c.json({ error: 'missing_api_key' }, 401);
+    }
+    const account = await getAccount(c.env.BUDGET_KV, apiKey);
+    if (!account) {
+      return c.json({ error: 'invalid_api_key' }, 401);
+    }
+    accountId = account.account_id;
+    stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
   }
-
-  const accountId = account.account_id;
-  const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
 
   const server = new McpServer({ name: 'gvnr', version: '1.8.1' });
 
