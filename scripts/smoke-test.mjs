@@ -93,30 +93,13 @@ await check('POST /v1/budget/clear (no credits) → no_credits', async () => {
 
 console.log('\nMCP routing');
 
-await check('POST /mcp tools/call (no key) → 401', async () => {
-  const res = await fetch(`${BASE}/mcp`, {
-    method: 'POST',
-    headers: MCP_HEADERS,
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: { name: 'get_balance', arguments: {} },
-    }),
-  });
-  assert(res.status === 401, `status ${res.status}`);
-});
-
-await check('POST /mcp tools/list (no key) → enumerates for indexers', async () => {
+await check('POST /mcp (no key) → 401', async () => {
   const res = await fetch(`${BASE}/mcp`, {
     method: 'POST',
     headers: MCP_HEADERS,
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
   });
-  assert(res.status === 200, `status ${res.status}`);
-  const body = await res.json();
-  const names = body.result?.tools?.map(t => t.name) ?? [];
-  assert(names.includes('budget_clear'), `tools: ${JSON.stringify(names)}`);
+  assert(res.status === 401, `status ${res.status}`);
 });
 
 await check('POST /mcp tools/list → three tools', async () => {
