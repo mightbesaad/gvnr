@@ -1682,6 +1682,23 @@ app.post('/v1/admin/seed', async (c) => {
   return c.json({ ok: true, api_key: body.api_key, credited_ops: Math.floor(body.amount_usd), operations_remaining: result.operations_remaining });
 });
 
+// Smoke-test the money-critical ops alert channels (Telegram + ops email) end-to-end through the
+// real worker env. Mirrors the alert creditAfterSettle fires on a settled-but-uncredited top-up,
+// so a misconfigured chat id or unset ALERT_EMAIL surfaces here instead of during an incident.
+// Returns each channel's dispatch status: sent | skipped_no_config | skipped_no_key | failed.
+app.post('/v1/admin/test-alert', async (c) => {
+  const secret = c.req.header('X-Admin-Secret');
+  if (!secret || secret !== c.env.ADMIN_SECRET) {
+    return c.json({ error: 'unauthorized', retryable: false, hint: 'Admin endpoint — a valid X-Admin-Secret header is required.' }, 401);
+  }
+
+  const alertText = `✅ gvnr ops-alert smoke test — if you can read this, alerting works (${new Date().toISOString()}).`;
+  const telegram = await sendTelegramAlert(c.env, alertText);
+  const email = await sendOpsEmailAlert(c.env.RESEND_API_KEY, c.env.ALERT_EMAIL, 'gvnr: ops-alert smoke test', alertText);
+
+  return c.json({ ok: true, telegram, email });
+});
+
 // Human payment routes — mounted before x402 middleware to avoid interception.
 // /v1/packs/:pack/info, /v1/account/topup-verify/:pack, /pay/:pack
 app.route('/', payRoutes);
