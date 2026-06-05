@@ -1,7 +1,7 @@
 import type { ApprovalRecord } from './approval';
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
-const FROM_ADDRESS = 'Gvnr <admin@gvnr.dev>';
+const FROM_ADDRESS = 'Gvnr <notifications@send.gvnr.dev>';
 
 export type EmailDispatchStatus = 'sent' | 'skipped_no_key' | 'failed';
 
