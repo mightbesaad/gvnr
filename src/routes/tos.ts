@@ -14,7 +14,7 @@ tos.get('/', (c) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Terms &amp; Privacy — Gvnr</title>
-  <meta name="description" content="Terms of service, refund policy, and privacy notice for Gvnr — the x402-paying AI agent substrate at gvnr.dev.">
+  <meta name="description" content="Terms of service, refund policy, and privacy notice for Gvnr — budget &amp; cost control for AI agents at gvnr.dev.">
   <meta property="og:title" content="Terms &amp; Privacy — Gvnr">
   <meta property="og:description" content="Terms of service, refund policy, and privacy notice for Gvnr.">
   <meta property="og:url" content="https://gvnr.dev/tos">

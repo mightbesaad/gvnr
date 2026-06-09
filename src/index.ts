@@ -152,7 +152,7 @@ app.get('/.well-known/mcp.json', (c) => {
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
     name: 'Gvnr',
-    description: 'x402-paying AI agent substrate: spend caps, rate limits, idempotency, reconciliation, approval bridges. One MCP endpoint, pay-as-you-go in USDC on Base.',
+    description: 'Budget & cost control for AI agents — per-agent spend caps, rate limits, idempotency, reconciliation, and approval bridges over one MCP endpoint. Pay-as-you-go in USDC on Base.',
     version: '1.8.1',
     url: 'https://gvnr.dev/mcp',
     transport: ['streamable-http'],
@@ -877,7 +877,7 @@ app.get('/', (c) => {
   <title>Gvnr — budget &amp; spend control for AI agents</title>
   <meta name="description" content="Budget and spend control for AI agents: enforce per-agent USD caps, cost limits, and rate limits before each LLM/API call. Hosted MCP endpoint, settled in USDC on Base — no proxy, no self-hosting.">
   <meta property="og:title" content="Gvnr">
-  <meta property="og:description" content="AI agent substrate — real-time spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges. One MCP endpoint, settled in USDC on Base.">
+  <meta property="og:description" content="Budget &amp; cost control for AI agents — per-agent spend caps, rate limits, idempotency, post-call reconciliation, and human approval bridges, enforced before each call. One MCP endpoint, settled in USDC on Base.">
   <meta property="og:url" content="https://gvnr.dev">
   <meta property="og:type" content="website">
   <meta name="robots" content="index, follow">
