@@ -15,6 +15,7 @@ import payRoutes from './routes/pay';
 import tosRoutes from './routes/tos';
 import b2bRoutes from './routes/b2b';
 import { getAccount } from './lib/kv';
+import { safeSecretEqual } from './lib/auth';
 import { renderPriceTable } from './lib/models';
 import { sendTelegramAlert, sendOpsEmailAlert } from './lib/notify';
 export { AccountState } from './lib/account-do';
@@ -1662,7 +1663,7 @@ app.get('/status', (c) => {
 // Admin: seed credits for beta users — requires X-Admin-Secret header
 app.post('/v1/admin/seed', async (c) => {
   const secret = c.req.header('X-Admin-Secret');
-  if (!secret || secret !== c.env.ADMIN_SECRET) {
+  if (!(await safeSecretEqual(secret, c.env.ADMIN_SECRET))) {
     return c.json({ error: 'unauthorized', retryable: false, hint: 'Admin endpoint — a valid X-Admin-Secret header is required.' }, 401);
   }
 
@@ -1688,7 +1689,7 @@ app.post('/v1/admin/seed', async (c) => {
 // Returns each channel's dispatch status: sent | skipped_no_config | skipped_no_key | failed.
 app.post('/v1/admin/test-alert', async (c) => {
   const secret = c.req.header('X-Admin-Secret');
-  if (!secret || secret !== c.env.ADMIN_SECRET) {
+  if (!(await safeSecretEqual(secret, c.env.ADMIN_SECRET))) {
     return c.json({ error: 'unauthorized', retryable: false, hint: 'Admin endpoint — a valid X-Admin-Secret header is required.' }, 401);
   }
 
