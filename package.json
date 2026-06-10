@@ -27,7 +27,7 @@
 		"@modelcontextprotocol/ext-apps": "^1.7.3",
 		"@modelcontextprotocol/sdk": "^1.29.0",
 		"@x402/core": "^2.12.0",
-		"@x402/evm": "^2.12.0",
+		"@x402/evm": "^2.14.0",
 		"@x402/hono": "^2.12.0",
 		"hono": "^4.12.18",
 		"zod": "^4.4.3"
