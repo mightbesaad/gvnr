@@ -1634,6 +1634,29 @@ describe('POST /v1/account/topup-verify/:pack', () => {
     expect(body.operations_remaining).toBe(19_000); // unchanged — no double credit
   });
 
+  it('creditForTx is atomic — one credit per tx hash under parallel calls (race regression)', async () => {
+    // The real-world double-credit race: N concurrent verifies all passed the old read-then-write
+    // KV replay guard (an on-chain RPC sat between the read and the write) and all credited one
+    // payment. The guard now lives in the DO, serialized by blockConcurrencyWhile, so parallel
+    // creditForTx calls for the same tx credit exactly once. The sequential test above only
+    // exercises the KV fast-path; this exercises the authoritative atomic guard directly.
+    const { accountId } = await provisionAccount();
+    const stub = env.ACCOUNT.get(env.ACCOUNT.idFromName(accountId));
+    const before = await stub.getOperations();
+    const TX = '0x' + 'f'.repeat(64);
+
+    const outcomes = await Promise.all([
+      stub.creditForTx(TX, 1000),
+      stub.creditForTx(TX, 1000),
+      stub.creditForTx(TX, 1000),
+      stub.creditForTx(TX, 1000),
+    ]);
+
+    expect(outcomes.filter((o) => !o.already_credited).length).toBe(1); // exactly one credit
+    expect(outcomes.filter((o) => o.already_credited).length).toBe(3);  // the rest deduped
+    expect(await stub.getOperations()).toBe(before + 1000);             // balance moved exactly once
+  });
+
   it('rejects transfer to wrong address', async () => {
     const TX = '0x' + 'e'.repeat(64);
     stubRpc(makeReceipt('0x' + 'dead'.padStart(40, '0'), 19_000_000n));

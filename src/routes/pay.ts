@@ -52,10 +52,14 @@ async function creditFromTx(c: PayCtx, rawTxHash: string | undefined) {
   const cfg = NETWORK_CONFIGS[network];
   if (!cfg) return c.json({ error: 'misconfigured_network', retryable: false, hint: 'Server network configuration error — retrying will not help; contact support.' }, 500);
 
-  const txKey = `used_tx:${cfg.chainId}:${txHash.toLowerCase()}`;
+  const hashLower = txHash.toLowerCase();
+  const txKey = `used_tx:${cfg.chainId}:${hashLower}`;
   const accountId = c.get('accountId');
   const stub = c.env.ACCOUNT.get(c.env.ACCOUNT.idFromName(accountId));
 
+  // Best-effort fast-path: skip the on-chain RPC on an obvious replay. NOT authoritative — the
+  // atomic guard lives in the DO (creditForTx) below. A KV miss just means we do the RPC and let
+  // the DO reject the duplicate; a KV hit can't be a false positive (only written after a credit).
   const alreadyUsed = await c.env.BUDGET_KV.get(txKey);
   if (alreadyUsed) {
     const operations = await stub.getOperations();
@@ -76,9 +80,17 @@ async function creditFromTx(c: PayCtx, rawTxHash: string | undefined) {
 
   const creditedUsd = Number(BigInt(verification.amount_raw!)) / 10 ** USDC_DECIMALS;
   const ops = opsForUsd(creditedUsd);
-  const credited = await stub.credit(ops);
 
-  // Mark tx as used — 30-day TTL prevents replay, doesn't bloat KV forever
+  // Atomic credit-once, keyed by tx hash, inside the DO. Concurrent requests for the same tx all
+  // clear the read-only verification above, but only the first credits here — the rest get
+  // already_credited and the balance moves exactly once.
+  const credited = await stub.creditForTx(hashLower, ops);
+  if (credited.already_credited) {
+    return c.json({ operations_remaining: credited.operations_remaining, already_credited: true });
+  }
+
+  // Populate the KV fast-path so future replays skip the RPC. 30-day TTL; the DO marker is the
+  // permanent source of truth, so KV expiry can never reopen the double-credit window.
   await c.env.BUDGET_KV.put(txKey, '1', { expirationTtl: 2592000 });
 
   return c.json({ operations_remaining: credited.operations_remaining, credited_ops: ops, credited_usd: creditedUsd });
