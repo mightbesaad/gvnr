@@ -46,6 +46,12 @@ account.post('/', async (c) => {
   return c.json({ api_key: apiKey, account_id: accountId, operations_remaining }, 201);
 });
 
+// GET /v1/account — whoami. Returns the account_id for the authenticated key. The /pay page needs
+// it to build the wallet-signature challenge that binds an on-chain top-up to this account (#13).
+account.get('/', authMiddleware, async (c) => {
+  return c.json({ account_id: c.get('accountId') });
+});
+
 // GET /v1/account/balance — remaining governance-operation quota
 account.get('/balance', authMiddleware, async (c) => {
   const accountId = c.get('accountId');

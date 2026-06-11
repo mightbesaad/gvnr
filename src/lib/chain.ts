@@ -64,7 +64,10 @@ export async function verifyUsdcTransfer(
   usdcContract: string,
   rpcUrl: string,
   fallbackRpcUrl?: string,
-): Promise<{ ok: boolean; error?: string; amount_raw?: string }> {
+): Promise<
+  | { ok: true; amount_raw: string; from_addresses: string[] }
+  | { ok: false; error: string }
+> {
   let receipt: RpcReceipt | null;
   try {
     receipt = await fetchReceipt(rpcUrl, txHash);
@@ -86,15 +89,21 @@ export async function verifyUsdcTransfer(
   // Sum every USDC transfer to payTo in this tx and credit whatever actually arrived
   // (pay-as-you-go). No expected-amount gate: the old `>= expected` check rejected
   // under-payments while the user's USDC had already moved to payTo — i.e. it ate their
-  // funds. Proportional crediting downstream removes that footgun.
+  // funds. Proportional crediting downstream removes that footgun. We also collect the
+  // sender(s) of those transfers (Transfer.from = topics[1]) so the caller can require a
+  // signature proving control of the paying wallet — without that binding, anyone watching
+  // payTo on-chain could redeem a stranger's tx_hash (front-running, see issue #13).
+  const senders = new Set<string>();
   let total = 0n;
   for (const log of receipt.logs) {
     if (log.address.toLowerCase() !== usdcLower) continue;
     if (log.topics[0]?.toLowerCase() !== TRANSFER_TOPIC) continue;
     if (log.topics[2]?.toLowerCase() !== paddedPayTo) continue;
+    const from = log.topics[1];
+    if (from) senders.add(`0x${from.slice(-40).toLowerCase()}`);
     total += BigInt(log.data);
   }
 
-  if (total > 0n) return { ok: true, amount_raw: total.toString() };
+  if (total > 0n) return { ok: true, amount_raw: total.toString(), from_addresses: [...senders] };
   return { ok: false, error: 'transfer_not_found' };
 }

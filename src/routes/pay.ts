@@ -6,6 +6,7 @@ import { PACKS, type PackName } from '../lib/x402';
 import { NETWORK_CONFIGS, type NetworkKey, usdToRawAmount, verifyUsdcTransfer, USDC_DECIMALS } from '../lib/chain';
 import { authMiddleware, type AuthVariables } from '../lib/auth';
 import { opsForUsd, OPS_PER_USD } from '../lib/models';
+import { buildTopupChallenge, recoverSigner } from '../lib/evm-sig';
 
 type Variables = AuthVariables;
 
@@ -42,7 +43,7 @@ pay.get('/v1/packs/:pack/info', async (c) => {
 // Verify a USDC transfer on-chain and credit ops proportional to however much actually arrived
 // at payTo (pay-as-you-go — any amount works, nothing is rejected or wasted). Shared by the
 // pack-less and back-compat pack-scoped verify routes; the pack segment is ignored for crediting.
-async function creditFromTx(c: PayCtx, rawTxHash: string | undefined) {
+async function creditFromTx(c: PayCtx, rawTxHash: string | undefined, rawSignature: string | undefined) {
   const txHash = rawTxHash?.trim();
   if (!txHash || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
     return c.json({ error: 'invalid_tx_hash', retryable: false, hint: 'tx_hash must be 0x-prefixed with 64 hex chars.' }, 400);
@@ -78,7 +79,29 @@ async function creditFromTx(c: PayCtx, rawTxHash: string | undefined) {
     return c.json({ error: verification.error, retryable: transient }, 400);
   }
 
-  const creditedUsd = Number(BigInt(verification.amount_raw!)) / 10 ** USDC_DECIMALS;
+  // Bind the credit to the payer: require a signature from the wallet that sent the USDC. The
+  // public tx_hash alone is not proof of payment — anyone watching payTo on-chain could otherwise
+  // redeem a stranger's transfer (issue #13). The challenge is bound to this account + tx + chain,
+  // so a captured signature can't be replayed to another account, tx, or network.
+  const signature = rawSignature?.trim();
+  if (!signature) {
+    return c.json({
+      error: 'signature_required',
+      retryable: false,
+      hint: 'Sign the top-up challenge with the wallet that sent the USDC and resend { tx_hash, signature }. The /pay page wallet flow does this for you.',
+    }, 400);
+  }
+  const challenge = buildTopupChallenge({ accountId, txHash: hashLower, chainId: cfg.chainId });
+  const signer = await recoverSigner(challenge, signature);
+  if (!signer || !verification.from_addresses.includes(signer)) {
+    return c.json({
+      error: 'sender_mismatch',
+      retryable: false,
+      hint: 'The signature must come from the wallet that sent the USDC in this transaction.',
+    }, 403);
+  }
+
+  const creditedUsd = Number(BigInt(verification.amount_raw)) / 10 ** USDC_DECIMALS;
   const ops = opsForUsd(creditedUsd);
 
   // Atomic credit-once, keyed by tx hash, inside the DO. Concurrent requests for the same tx all
@@ -98,15 +121,15 @@ async function creditFromTx(c: PayCtx, rawTxHash: string | undefined) {
 
 // POST /v1/account/topup-verify — pay-as-you-go on-chain verification for ANY amount sent.
 pay.post('/v1/account/topup-verify', authMiddleware, async (c) => {
-  const body = await c.req.json<{ tx_hash?: string }>();
-  return creditFromTx(c, body.tx_hash);
+  const body = await c.req.json<{ tx_hash?: string; signature?: string }>();
+  return creditFromTx(c, body.tx_hash, body.signature);
 });
 
 // POST /v1/account/topup-verify/:pack — back-compat. Credits proportional to actual amount
 // received; the :pack segment no longer constrains the credit.
 pay.post('/v1/account/topup-verify/:pack', authMiddleware, async (c) => {
-  const body = await c.req.json<{ tx_hash?: string }>();
-  return creditFromTx(c, body.tx_hash);
+  const body = await c.req.json<{ tx_hash?: string; signature?: string }>();
+  return creditFromTx(c, body.tx_hash, body.signature);
 });
 
 // GET /pay — custom-amount payment page (name your own amount; ?usd= prefills it).
@@ -329,6 +352,7 @@ function payPage(d: PageData): string {
 
     <div class="field-label" style="margin-top:${d.apiKey ? '0' : '12px'}">Transaction hash</div>
     <input type="text" id="tx-hash" placeholder="0x..." value="">
+    <div style="font-size:0.72rem;color:#666;margin-top:8px;line-height:1.5">You'll sign a free (no-gas) message with the wallet that sent the payment — it proves the payment is yours and credits it to your account.</div>
 
     <button class="btn btn-primary" onclick="verifyPayment()">Verify &amp; Credit my account</button>
 
@@ -413,7 +437,44 @@ function showStatus(msg, type) {
   el.style.display = 'block';
 }
 
-async function attemptVerify() {
+// Prove control of the wallet that sent the USDC: sign a challenge bound to (account, tx, chain).
+// Without this the server rejects the credit, so a stranger can't redeem a public tx hash (#13).
+async function signTopupChallenge(apiKey, txHashLower, fromOpt) {
+  let accountId;
+  try {
+    const who = await fetch('/v1/account', { headers: { 'Authorization': 'Bearer ' + apiKey } });
+    if (!who.ok) return { error: 'whoami' };
+    accountId = (await who.json()).account_id;
+  } catch { return { error: 'whoami' }; }
+  if (!window.ethereum) return { error: 'no_wallet' };
+  let from = fromOpt;
+  if (!from) {
+    try { from = (await ethereum.request({ method: 'eth_requestAccounts' }))[0]; }
+    catch { return { error: 'wallet_rejected' }; }
+  }
+  // Must match the server's buildTopupChallenge byte-for-byte.
+  const message =
+    'gvnr.dev top-up authorization\n' +
+    'account: ' + accountId + '\n' +
+    'tx: ' + txHashLower + '\n' +
+    'chain: ' + CHAIN_ID;
+  try {
+    const signature = await ethereum.request({ method: 'personal_sign', params: [message, from] });
+    return { signature };
+  } catch { return { error: 'sign_rejected' }; }
+}
+
+function showSignError(code) {
+  const m = {
+    whoami: 'Could not verify your API key — check it and try again.',
+    no_wallet: 'No wallet detected. Install MetaMask or Coinbase Wallet to authorize the credit.',
+    wallet_rejected: 'Wallet connection was rejected.',
+    sign_rejected: 'Signature rejected — it is required to credit your account (no gas; it just proves you sent the payment).',
+  };
+  showStatus(m[code] || 'Could not sign the authorization.', 'err');
+}
+
+async function attemptVerify(signature) {
   const apiKey = document.getElementById('api-key').value.trim();
   const txHash = document.getElementById('tx-hash').value.trim();
   if (!apiKey) return { localError: 'no_key' };
@@ -422,7 +483,7 @@ async function attemptVerify() {
     const res = await fetch('/v1/account/topup-verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-      body: JSON.stringify({ tx_hash: txHash }),
+      body: JSON.stringify({ tx_hash: txHash, signature }),
     });
     const data = await res.json();
     return { ok: res.ok, data };
@@ -449,18 +510,28 @@ function showVerifyResult(result) {
     transfer_not_found: 'No matching USDC transfer found in this transaction.',
     rpc_error: 'Could not reach Base RPC. Try again in a moment.',
     invalid_tx_hash: 'Invalid transaction hash format.',
+    signature_required: 'Authorization signature missing — connect the wallet you paid from and try again.',
+    sender_mismatch: 'The wallet you signed with did not send this payment. Connect the wallet that sent the USDC.',
   };
   showStatus(msgs[result.data.error] || ('Error: ' + result.data.error), 'err');
 }
 
 async function verifyPayment() {
+  const apiKey = document.getElementById('api-key').value.trim();
+  const txHash = document.getElementById('tx-hash').value.trim();
+  if (!apiKey) return showStatus('Enter your API key.', 'err');
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) return showStatus('Enter a valid transaction hash (0x + 64 hex chars).', 'err');
+  // Sign with the wallet that sent the USDC (no gas) to authorize crediting this account.
+  showStatus('Authorizing — approve the signature in your wallet (no gas)...', 'info');
+  const signed = await signTopupChallenge(apiKey, txHash.toLowerCase());
+  if (signed.error) return showSignError(signed.error);
   showStatus('Verifying on-chain...', 'info');
-  showVerifyResult(await attemptVerify());
+  showVerifyResult(await attemptVerify(signed.signature));
 }
 
 // Auto-verify after wallet pay — retries on transient errors (tx not indexed yet, RPC blip).
 const TRANSIENT_ERRORS = new Set(['tx_not_found', 'rpc_error']);
-async function autoVerify(attempt, retryDelays) {
+async function autoVerify(attempt, retryDelays, signature) {
   const totalAttempts = retryDelays.length + 1;
   showStatus(
     attempt === 1
@@ -468,7 +539,7 @@ async function autoVerify(attempt, retryDelays) {
       : 'Tx not indexed yet — retry ' + attempt + '/' + totalAttempts + '...',
     'info',
   );
-  const result = await attemptVerify();
+  const result = await attemptVerify(signature);
   const transient = !result.ok && result.data && TRANSIENT_ERRORS.has(result.data.error);
   if (!transient || attempt >= totalAttempts) {
     if (transient) {
@@ -481,7 +552,7 @@ async function autoVerify(attempt, retryDelays) {
     showVerifyResult(result);
     return;
   }
-  setTimeout(() => autoVerify(attempt + 1, retryDelays), retryDelays[attempt - 1]);
+  setTimeout(() => autoVerify(attempt + 1, retryDelays, signature), retryDelays[attempt - 1]);
 }
 
 // Preview mode — ?preview=success shows post-payment UI without a real transaction
@@ -565,11 +636,28 @@ async function connectAndPay() {
     });
 
     document.getElementById('tx-hash').value = txHash;
-    showStatus('Transaction submitted (' + txHash.slice(0, 10) + '...). Waiting for confirmation...', 'info');
+    const apiKey = document.getElementById('api-key').value.trim();
+    if (!apiKey) {
+      showStatus('Payment sent (' + txHash.slice(0, 10) + '...). Enter your API key above, then click "Verify & Credit my account".', 'info');
+      btn.textContent = 'Connect wallet & pay automatically';
+      btn.disabled = false;
+      return;
+    }
+    // Sign the authorization with the same wallet that just paid (no gas) so the server can bind
+    // the credit to this account, then verify.
+    showStatus('Payment sent (' + txHash.slice(0, 10) + '...). Approve the signature in your wallet (no gas)...', 'info');
+    const signed = await signTopupChallenge(apiKey, txHash.toLowerCase(), from);
+    if (signed.error) {
+      showSignError(signed.error);
+      btn.textContent = 'Connect wallet & pay automatically';
+      btn.disabled = false;
+      return;
+    }
+    showStatus('Authorized. Waiting for confirmation...', 'info');
     btn.textContent = 'Waiting for confirmation...';
 
     // First attempt at 6s, then retry on tx_not_found / rpc_error at +9s and +15s (≈30s total).
-    setTimeout(() => autoVerify(1, [9000, 15000]), 6000);
+    setTimeout(() => autoVerify(1, [9000, 15000], signed.signature), 6000);
   } catch (err) {
     showStatus(err.message || 'Wallet error.', 'err');
     btn.textContent = 'Connect wallet & pay automatically';
