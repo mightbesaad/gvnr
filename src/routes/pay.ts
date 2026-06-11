@@ -452,11 +452,13 @@ async function signTopupChallenge(apiKey, txHashLower, fromOpt) {
     try { from = (await ethereum.request({ method: 'eth_requestAccounts' }))[0]; }
     catch { return { error: 'wallet_rejected' }; }
   }
-  // Must match the server's buildTopupChallenge byte-for-byte.
+  // Must match the server's buildTopupChallenge byte-for-byte. NOTE: \\n (not \n) — this string
+  // lives inside the server-side template literal, so \n would render as a real newline and break
+  // the single-quoted JS string delivered to the browser. \\n renders as a literal \n escape.
   const message =
-    'gvnr.dev top-up authorization\n' +
-    'account: ' + accountId + '\n' +
-    'tx: ' + txHashLower + '\n' +
+    'gvnr.dev top-up authorization\\n' +
+    'account: ' + accountId + '\\n' +
+    'tx: ' + txHashLower + '\\n' +
     'chain: ' + CHAIN_ID;
   try {
     const signature = await ethereum.request({ method: 'personal_sign', params: [message, from] });
