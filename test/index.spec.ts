@@ -1834,6 +1834,20 @@ describe('POST /v1/account/topup-verify/:pack', () => {
   });
 });
 
+describe('GET /pay — payment page', () => {
+  it('delivers the wallet-challenge newline as an escape, not a raw line break (#13 regression)', async () => {
+    const res = await SELF.fetch('http://localhost/pay');
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    const script = (html.match(/<script>([\s\S]*?)<\/script>/) ?? [])[1] ?? '';
+    // The inline script is built inside a server-side template literal, so a bare \n in the
+    // challenge string renders as a REAL newline inside a single-quoted JS string and breaks the
+    // whole page's script. It must be delivered as a two-char \n escape. (Workers block
+    // new Function/eval, so we guard the exact byte pattern rather than compiling the script.)
+    expect(script).toContain("'gvnr.dev top-up authorization\\n'");
+  });
+});
+
 // ── MCP tool helpers ──────────────────────────────────────────────────────────
 
 async function mcpCall(apiKey: string, method: string, params: object) {
