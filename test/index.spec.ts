@@ -3,6 +3,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import worker from '../src/index';
 import { parseTopupUsd, MIN_TOPUP_USD, MAX_TOPUP_USD, shouldCreditAfterSettle, type TopupIntent } from '../src/lib/x402';
 import { sendTelegramAlert, sendOpsEmailAlert } from '../src/lib/notify';
+import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
+import { buildTopupChallenge } from '../src/lib/evm-sig';
 
 // ── RPC mock helpers ─────────────────────────────────────────────────────────
 
@@ -10,14 +12,26 @@ const PAYTO = '0xBcF326ff22CDEc10Ca4F8AE9415Bb6884a0c26D3';
 const USDC_SEPOLIA = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
-function makeReceipt(toAddress: string, rawAmount: bigint, status = '0x1') {
+// Ephemeral test wallets (freshly generated per run — no key material in the repo). PAYER is the
+// on-chain sender in receipts and signs the top-up authorization challenge the server now requires
+// (#13); ATTACKER is a different wallet used in the front-running rejection tests.
+const PAYER = privateKeyToAccount(generatePrivateKey());
+const ATTACKER = privateKeyToAccount(generatePrivateKey());
+
+// Sign the exact challenge the server rebuilds (test chain id is Base Sepolia, 84532).
+async function signTopup(accountId: string, txHash: string, account = PAYER, chainId = 84532): Promise<string> {
+  return account.signMessage({ message: buildTopupChallenge({ accountId, txHash, chainId }) });
+}
+
+function makeReceipt(toAddress: string, rawAmount: bigint, opts: { from?: string; status?: string } = {}) {
+  const from = opts.from ?? '0x000000000000000000000000000000000000dEaD';
   return {
-    status,
+    status: opts.status ?? '0x1',
     logs: [{
       address: USDC_SEPOLIA.toLowerCase(),
       topics: [
         TRANSFER_TOPIC,
-        '0x' + 'dead'.padStart(64, '0'), // from — not checked
+        '0x000000000000000000000000' + from.slice(2).toLowerCase(), // Transfer.from
         '0x000000000000000000000000' + toAddress.slice(2).toLowerCase(),
       ],
       data: '0x' + rawAmount.toString(16).padStart(64, '0'),
@@ -1548,12 +1562,12 @@ describe('POST /v1/account/topup-verify/:pack', () => {
 
   it('pack-less route /v1/account/topup-verify credits proportionally (custom amount)', async () => {
     const TX = '0x' + '7'.repeat(64);
-    stubRpc(makeReceipt(PAYTO, 3_500_000n)); // $3.50 custom amount
-    const { apiKey } = await provisionAccount();
+    stubRpc(makeReceipt(PAYTO, 3_500_000n, { from: PAYER.address })); // $3.50 custom amount
+    const { apiKey, accountId } = await provisionAccount();
     const res = await SELF.fetch('http://localhost/v1/account/topup-verify', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_hash: TX }),
+      body: JSON.stringify({ tx_hash: TX, signature: await signTopup(accountId, TX) }),
     });
     expect(res.status).toBe(200);
     const body = await res.json<{ credited_ops: number; credited_usd: number }>();
@@ -1589,13 +1603,13 @@ describe('POST /v1/account/topup-verify/:pack', () => {
 
   it('credits account and marks tx used on valid payment', async () => {
     const TX = '0x' + 'c'.repeat(64);
-    stubRpc(makeReceipt(PAYTO, 19_000_000n));
-    const { apiKey } = await provisionAccount();
+    stubRpc(makeReceipt(PAYTO, 19_000_000n, { from: PAYER.address }));
+    const { apiKey, accountId } = await provisionAccount();
 
     const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_hash: TX }),
+      body: JSON.stringify({ tx_hash: TX, signature: await signTopup(accountId, TX) }),
     });
     expect(res.status).toBe(200);
     const body = await res.json<{ operations_remaining: number; credited_ops: number }>();
@@ -1615,18 +1629,19 @@ describe('POST /v1/account/topup-verify/:pack', () => {
 
   it('second submit of same tx hash returns existing balance, does not double-credit', async () => {
     const TX = '0x' + 'd'.repeat(64);
-    stubRpc(makeReceipt(PAYTO, 19_000_000n));
-    const { apiKey } = await provisionAccount();
+    stubRpc(makeReceipt(PAYTO, 19_000_000n, { from: PAYER.address }));
+    const { apiKey, accountId } = await provisionAccount();
+    const signature = await signTopup(accountId, TX);
     await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_hash: TX }),
+      body: JSON.stringify({ tx_hash: TX, signature }),
     });
 
     const second = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_hash: TX }),
+      body: JSON.stringify({ tx_hash: TX, signature }),
     });
     expect(second.status).toBe(200);
     const body = await second.json<{ operations_remaining: number; already_credited: boolean }>();
@@ -1673,13 +1688,13 @@ describe('POST /v1/account/topup-verify/:pack', () => {
 
   it('PAYG: credits proportionally when less than the preset is sent (no rejection, no lost funds)', async () => {
     const TX = '0x' + 'f'.repeat(64);
-    stubRpc(makeReceipt(PAYTO, 1_000_000n)); // $1 sent against the $19 "starter" preset
-    const { apiKey } = await provisionAccount();
+    stubRpc(makeReceipt(PAYTO, 1_000_000n, { from: PAYER.address })); // $1 sent against the $19 "starter" preset
+    const { apiKey, accountId } = await provisionAccount();
 
     const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_hash: TX }),
+      body: JSON.stringify({ tx_hash: TX, signature: await signTopup(accountId, TX) }),
     });
     expect(res.status).toBe(200);
     const body = await res.json<{ credited_ops: number; credited_usd: number }>();
@@ -1689,13 +1704,13 @@ describe('POST /v1/account/topup-verify/:pack', () => {
 
   it('PAYG: under-payment by 1 wei is still credited proportionally (footgun fix)', async () => {
     const TX = '0x' + '1'.repeat(64);
-    stubRpc(makeReceipt(PAYTO, 19_000_000n - 1n)); // $18.999999
-    const { apiKey } = await provisionAccount();
+    stubRpc(makeReceipt(PAYTO, 19_000_000n - 1n, { from: PAYER.address })); // $18.999999
+    const { apiKey, accountId } = await provisionAccount();
 
     const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_hash: TX }),
+      body: JSON.stringify({ tx_hash: TX, signature: await signTopup(accountId, TX) }),
     });
     expect(res.status).toBe(200);
     const body = await res.json<{ credited_ops: number }>();
@@ -1704,13 +1719,13 @@ describe('POST /v1/account/topup-verify/:pack', () => {
 
   it('PAYG: over-payment is credited in full, no surplus wasted', async () => {
     const TX = '0x' + '2'.repeat(64);
-    stubRpc(makeReceipt(PAYTO, 20_000_000n)); // $20 sent against the $19 "starter" preset
-    const { apiKey } = await provisionAccount();
+    stubRpc(makeReceipt(PAYTO, 20_000_000n, { from: PAYER.address })); // $20 sent against the $19 "starter" preset
+    const { apiKey, accountId } = await provisionAccount();
 
     const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_hash: TX }),
+      body: JSON.stringify({ tx_hash: TX, signature: await signTopup(accountId, TX) }),
     });
     expect(res.status).toBe(200);
     const body = await res.json<{ credited_ops: number; credited_usd: number }>();
@@ -1732,23 +1747,90 @@ describe('POST /v1/account/topup-verify/:pack', () => {
         calls.push('fallback');
         return new Response(JSON.stringify({
           jsonrpc: '2.0',
-          result: makeReceipt(PAYTO, 19_000_000n),
+          result: makeReceipt(PAYTO, 19_000_000n, { from: PAYER.address }),
           id: 1,
         }), { headers: { 'Content-Type': 'application/json' } });
       }
       return real(input, init);
     });
 
-    const { apiKey } = await provisionAccount();
+    const { apiKey, accountId } = await provisionAccount();
     const res = await SELF.fetch('http://localhost/v1/account/topup-verify/starter', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_hash: TX }),
+      body: JSON.stringify({ tx_hash: TX, signature: await signTopup(accountId, TX) }),
     });
 
     expect(res.status).toBe(200);
     expect((await res.json<{ operations_remaining: number }>()).operations_remaining).toBe(19_000);
     expect(calls).toEqual(['primary', 'fallback']);
+  });
+
+  // ── #13: bind the credit to the payer (front-running guard) ──────────────────
+  it('rejects a credit with no signature — a public tx_hash alone is not proof of payment', async () => {
+    const TX = '0x' + 'a1'.repeat(32);
+    stubRpc(makeReceipt(PAYTO, 5_000_000n, { from: PAYER.address }));
+    const { apiKey, accountId } = await provisionAccount();
+    const stub = env.ACCOUNT.get(env.ACCOUNT.idFromName(accountId));
+    const before = await stub.getOperations();
+
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX }), // no signature
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toBe('signature_required');
+    expect(await stub.getOperations()).toBe(before); // nothing credited
+  });
+
+  it('rejects a signature from a wallet that did not send the payment (front-running theft)', async () => {
+    // Attacker scrapes the victim's tx_hash off-chain and tries to claim it on their own account,
+    // signing with their own wallet.
+    const TX = '0x' + 'b2'.repeat(32);
+    stubRpc(makeReceipt(PAYTO, 5_000_000n, { from: PAYER.address })); // the victim's wallet paid
+    const { apiKey, accountId } = await provisionAccount();           // the attacker's account
+
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX, signature: await signTopup(accountId, TX, ATTACKER) }),
+    });
+    expect(res.status).toBe(403);
+    expect((await res.json<{ error: string }>()).error).toBe('sender_mismatch');
+  });
+
+  it('rejects a valid signature replayed to a different account (account binding)', async () => {
+    const TX = '0x' + 'c3'.repeat(32);
+    stubRpc(makeReceipt(PAYTO, 5_000_000n, { from: PAYER.address }));
+    const victim = await provisionAccount();
+    const attacker = await provisionAccount();
+
+    // The payer signs a challenge bound to the VICTIM's account; the attacker replays that exact
+    // signature under their own account. The server rebuilds the challenge with the attacker's
+    // account id, so the recovered signer no longer matches the on-chain sender.
+    const victimSig = await signTopup(victim.accountId, TX);
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${attacker.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX, signature: victimSig }),
+    });
+    expect(res.status).toBe(403);
+    expect((await res.json<{ error: string }>()).error).toBe('sender_mismatch');
+  });
+
+  it('credits when signed by the wallet that actually sent the USDC (happy path)', async () => {
+    const TX = '0x' + 'd4'.repeat(32);
+    stubRpc(makeReceipt(PAYTO, 7_000_000n, { from: PAYER.address }));
+    const { apiKey, accountId } = await provisionAccount();
+
+    const res = await SELF.fetch('http://localhost/v1/account/topup-verify', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_hash: TX, signature: await signTopup(accountId, TX) }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json<{ credited_ops: number }>()).credited_ops).toBe(7_000);
   });
 });
 
